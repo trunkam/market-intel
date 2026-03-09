@@ -28,10 +28,10 @@ exports.handler = async (event) => {
   try {
     let url;
     if (endpoint === 'gainers') {
-      url = `https://financialmodelingprep.com/stable/gainers?apikey=${apikey}`;
+      url = `https://financialmodelingprep.com/stable/biggest-gainers?apikey=${apikey}`;
     } else if (endpoint === 'shares-float') {
       if (!symbol) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbol' }) };
-      url = `https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${apikey}`;
+      url = `https://financialmodelingprep.com/api/v4/stock_float?symbol=${symbol}&apikey=${apikey}`;
     }
 
     const response = await fetch(url, {
