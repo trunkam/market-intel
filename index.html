@@ -1078,24 +1078,21 @@ async function fetchYahooSmallCap() {
   const seen    = new Set();
   const results = [];
 
-  // Fetch parallelo: small_cap_gainers e most_actives sempre insieme
+  // Fetch parallelo: tutte e tre le fonti insieme
   const primaryScreeners = [
     { id: 'small_cap_gainers', label: 'Small Cap Gainers' },
     { id: 'most_actives',      label: 'Most Actives'      },
+    { id: 'day_gainers',       label: 'Day Gainers'       },
   ];
 
   setScanStatus('Recupero dati Yahoo Finance...');
 
   await Promise.all(primaryScreeners.map(async (screener) => {
-    for (const mirror of ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com']) {
-      const url = `${mirror}/v1/finance/screener/predefined/saved?scrIds=${screener.id}&count=50&formatted=false`;
-      try {
-        const data   = await fetchYahooViaNetlify(screener.id, 50);
-        const quotes = parseYahooQuotes(data);
-        quotes.forEach(t => { if (!seen.has(t.ticker)) { seen.add(t.ticker); results.push(t); } });
-        break;
-      } catch(e) { continue; }
-    }
+    try {
+      const data   = await fetchYahooViaNetlify(screener.id, 50);
+      const quotes = parseYahooQuotes(data);
+      quotes.forEach(t => { if (!seen.has(t.ticker)) { seen.add(t.ticker); results.push(t); } });
+    } catch(e) { /* ignora errori singola fonte */ }
   }));
 
   if (!results.length) throw new Error('Nessun dato disponibile — mercato chiuso o problema connessione');
@@ -1161,12 +1158,11 @@ function applyFilters(tickers) {
     );
   }
 
-  // Filtro RVOL minimo
+  // Filtro RVOL minimo — se dato mancante NON escludere
   if (activeRvol > 0) {
-    filtered = filtered.filter(t => {
-      if (!t.rvol) return false; // se non abbiamo RVOL, escludiamo
-      return t.rvol >= activeRvol;
-    });
+    filtered = filtered.filter(t =>
+      !t.rvol || t.rvol >= activeRvol
+    );
   }
 
   // Solo gainers (chg > 0)
