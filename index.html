@@ -1348,8 +1348,8 @@ function showRossDetail(t) {
 
   // Banner stima rapida
   h += `<div style="background:rgba(240,165,0,.05);border:1px solid rgba(240,165,0,.15);border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:9px;color:var(--muted3);line-height:1.8">
-    ⚡ <strong style="color:var(--amber)">STIMA RAPIDA</strong> — basata su dati screener + conoscenza interna di Claude.<br>
-    Clicca <strong style="color:var(--text)">▶ ANALIZZA</strong> per l'analisi completa con ricerca live news e catalyst.
+    ⚡ <strong style="color:var(--amber)">SCAN ROSS</strong> — Float, Price, Volume e Setup valutati da dati Yahoo.<br>
+    <strong style="color:var(--red)">⚠ Catalyst non verificato</strong> — usa <strong style="color:var(--text)">▶ ANALIZZA</strong> per notizie live e punteggio completo.
   </div>`;
 
   // Alert
@@ -1362,15 +1362,18 @@ function showRossDetail(t) {
     </div>`;
   }
 
-  // Catalyst card separata con link ricerca
-  if (rep.catalyst && rep.catalyst !== 'NESSUNO') {
-    h += `<div class="icard">
-      <div class="ic-head"><span class="ic-icon">⚡</span><span class="ic-title">CATALYST</span>
-        <a href="https://www.google.com/search?q=${encodeURIComponent(t.ticker+' '+rep.catalyst)}" target="_blank" style="margin-left:auto;font-size:8px;color:var(--blue);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:2px">🔍 VERIFICA</a>
-      </div>
-      <div class="ic-body">${rep.catalyst}</div>
-    </div>`;
-  }
+  // Catalyst card — in SCAN ROSS è sempre sconosciuto
+  h += `<div class="icard" style="border-color:rgba(240,165,0,.15)">
+    <div class="ic-head">
+      <span class="ic-icon">⚡</span>
+      <span class="ic-title">CATALYST</span>
+      <span style="margin-left:auto;font-size:8px;color:var(--muted2);letter-spacing:.5px">NON VERIFICATO</span>
+    </div>
+    <div class="ic-body" style="color:var(--muted2);font-size:10px">
+      Catalyst non verificato — SCAN ROSS non ha accesso a notizie live.<br>
+      Clicca <strong style="color:var(--amber)">▶ ANALIZZA</strong> per ricerca web in tempo reale.
+    </div>
+  </div>`;
 
   // 5 Pillars
   h += `<div class="pillars-grid">${pOrder.map(p => {
@@ -1553,10 +1556,17 @@ async function callClaudeQuick(ticker, apiKey) {
 
 TICKER: ${ticker.ticker} | Prezzo: $${ticker.price.toFixed(2)} | CHG: ${ticker.chg > 0 ? '+' : ''}${ticker.chg.toFixed(2)}% | Vol: ${fmtVol(ticker.vol)} | RVOL: ${ticker.rvol ? ticker.rvol.toFixed(1)+'x' : 'n/a'} | Float: ${ticker.float ? fmtVol(ticker.float) : 'n/a'} | MktCap: ${ticker.mktCap ? '$'+fmtVol(ticker.mktCap) : 'n/a'} | Nome: ${ticker.name || '?'}${ticker.prePrice ? ` | PRE-MKT: $${ticker.prePrice.toFixed(2)} (${ticker.preChg > 0?'+':''}${(ticker.preChg||0).toFixed(2)}%)` : ''}
 
-Basandoti sui dati forniti e sulla tua conoscenza del titolo, valuta i 5 Pillars Ross Cameron e assegna un Ross Score per scalping intraday. Non cercare sul web.
+Valuta SOLO i 4 pillar oggettivi basandoti sui dati forniti (NON valutare il catalyst — non hai accesso a notizie live):
+- FLOAT: valuta da dati sopra
+- PRICE: valuta da dati sopra  
+- VOLUME: valuta RVOL e volume assoluto
+- SETUP: valuta momentum e pattern probabile
+
+Il catalyst NON va valutato — impostalo sempre a score:5, value:"?", note:"Usa ANALIZZA per notizie live".
+Il rossScore deve riflettere solo i 4 pillar oggettivi (ignora catalyst nel calcolo).
 
 Rispondi SOLO con JSON:
-{"ticker":"${ticker.ticker}","rossScore":7,"catalyst":"tipo o NESSUNO","timing":"APERTURA","sentiment":"BULLISH","pillars":{"float":{"score":7,"value":"XM"},"catalyst":{"score":8,"value":"tipo"},"price":{"score":7,"value":"$X"},"volume":{"score":8,"value":"Xx"},"setup":{"score":6,"value":"tipo"}},"tradingAlert":"alert breve","watchLevel":"$X.XX","company":"nome","currentPrice":"$${ticker.price.toFixed(2)}","sentimentScore":70,"sections":[],"sources":[]}`;
+{"ticker":"${ticker.ticker}","rossScore":7,"catalyst":"?","timing":"APERTURA","sentiment":"BULLISH","pillars":{"float":{"score":7,"value":"XM","note":"..."},"catalyst":{"score":5,"value":"?","note":"Usa ▶ ANALIZZA per notizie live"},"price":{"score":7,"value":"$X","note":"..."},"volume":{"score":8,"value":"Xx","note":"..."},"setup":{"score":6,"value":"tipo","note":"..."}},"tradingAlert":"alert breve basato su dati oggettivi","watchLevel":"$X.XX","company":"nome","currentPrice":"$${ticker.price.toFixed(2)}","sentimentScore":70,"sections":[],"sources":[]}`;
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
