@@ -544,13 +544,28 @@ body {
 }
 .src-link:hover { border-color: var(--blue); }
 
-.err-box {
-  background: rgba(255,59,78,.06);
-  border: 1px solid rgba(255,59,78,.2);
-  border-radius: 4px;
-  padding: 10px 12px;
-  color: var(--red);
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: var(--s4);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 7px 16px;
   font-size: 10px;
+  color: var(--amber);
+  letter-spacing: 1px;
+  opacity: 0;
+  transition: all .2s ease;
+  pointer-events: none;
+  z-index: 999;
+  white-space: nowrap;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 </style>
 </head>
@@ -676,6 +691,8 @@ body {
   </div>
 
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 /* ══════════════════════════════════
@@ -1024,14 +1041,39 @@ function renderTickers(tickers, fromSort = false) {
   }).join('');
 }
 
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1800);
+}
+
 function selectTicker(i) {
   document.querySelectorAll('.ticker-row').forEach(r => r.classList.remove('active'));
   const el = document.getElementById(`tr${i}`);
   if (el) el.classList.add('active');
 
-  // Se il ticker ha già uno score Ross, mostra il dettaglio nel pannello destro
   const t = scanData[i];
-  if (t && t._analysis) showRossDetail(t);
+  if (!t) return;
+
+  // Copia ticker negli appunti
+  navigator.clipboard.writeText(t.ticker).then(() => {
+    showToast(`📋 ${t.ticker} copiato`);
+  }).catch(() => {
+    // Fallback per browser che non supportano clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = t.ticker;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(`📋 ${t.ticker} copiato`);
+  });
+
+  if (t._analysis) showRossDetail(t);
 }
 
 function showRossDetail(t) {
