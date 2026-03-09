@@ -122,22 +122,47 @@ body {
 
 /* ── FILTERS ── */
 .filtersbar {
-  height: 36px;
+  min-height: 34px;
   background: var(--s1);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   padding: 0 14px;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
-  overflow-x: auto;
+  flex-wrap: wrap; /* wrap su schermi stretti */
+  overflow: visible;
+  row-gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 .filtersbar::-webkit-scrollbar { display: none; }
 
-.flabel { font-size: 8px; color: var(--muted2); text-transform: uppercase; letter-spacing: 2px; white-space: nowrap; margin-right: 2px; }
+.flabel { font-size: 8px; color: var(--muted2); text-transform: uppercase; letter-spacing: 2px; white-space: nowrap; margin-right: 1px; }
+
+/* pill sessione — icona + testo corto, più compatto */
+.ftag-session {
+  padding: 2px 6px;
+  background: var(--s3);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  font-size: 10px;
+  color: var(--muted2);
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.ftag-session:hover { color: var(--text); border-color: var(--muted3); }
+.ftag-session.on { background: rgba(240,165,0,.08); border-color: rgba(240,165,0,.35); color: var(--amber); }
+.ftag-session .sicon { font-size: 11px; line-height: 1; }
+.ftag-session .slabel { font-family: 'IBM Plex Mono', monospace; font-size: 8px; letter-spacing: .5px; }
 
 .ftag {
-  padding: 2px 8px;
+  padding: 2px 7px;
   background: var(--s3);
   border: 1px solid var(--border2);
   border-radius: 2px;
@@ -714,46 +739,53 @@ body {
     <div style="font-size:8px;color:var(--muted2);letter-spacing:1px">COSTO SESSIONE</div>
     <div id="costVal" style="font-family:'Bebas Neue',sans-serif;font-size:14px;color:var(--amber)">$0.0000</div>
   </div>
+  <div class="vsep"></div>
+  <div id="fmpBox" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;cursor:pointer" onclick="resetFmpCount()" title="Chiamate FMP oggi — clicca per azzerare">
+    <div style="font-size:8px;color:var(--muted2);letter-spacing:1px">FMP OGGI</div>
+    <div id="fmpVal" style="font-family:'Bebas Neue',sans-serif;font-size:14px;color:var(--muted3)">0</div>
+  </div>
 </div>
 
 <!-- FILTERS -->
 <div class="filtersbar">
-  <div class="flabel">SESSIONE:</div>
-  <div class="ftag on" id="tagPreMkt" onclick="toggleSession('pre')">PRE-MKT</div>
-  <div class="ftag on" id="tagIntra"  onclick="toggleSession('intra')">INTRADAY</div>
+  <div class="ftag-session on" id="tagPreMkt" onclick="toggleSession('pre')" title="Pre-Market">
+    <span class="sicon">🌅</span><span class="slabel">PRE</span>
+  </div>
+  <div class="ftag-session on" id="tagIntra" onclick="toggleSession('intra')" title="Intraday">
+    <span class="sicon">☀️</span><span class="slabel">MKT</span>
+  </div>
   <div class="vsep"></div>
-  <div class="flabel">FILTRO:</div>
-  <div class="ftag on" data-f="gapup"   onclick="toggleF(this)">↑ GAP UP</div>
-  <div class="ftag on" data-f="volume"  onclick="toggleF(this)">VOL ANOMALO</div>
-  <div class="ftag on" data-f="gainers" onclick="toggleF(this)">TOP GAINERS</div>
-  <div class="ftag"    data-f="losers"  onclick="toggleF(this)">TOP LOSERS</div>
+  <div class="ftag on" data-f="gapup"   onclick="toggleF(this)" title="Gap Up">↑ GAP</div>
+  <div class="ftag on" data-f="volume"  onclick="toggleF(this)" title="Volume anomalo">VOL</div>
+  <div class="ftag on" data-f="gainers" onclick="toggleF(this)" title="Top Gainers">▲</div>
+  <div class="ftag"    data-f="losers"  onclick="toggleF(this)" title="Top Losers">▼</div>
   <div class="vsep"></div>
-  <div class="flabel">MIN GAP%:</div>
+  <div class="flabel">GAP%:</div>
   <div class="ftag on" data-g="3"  onclick="toggleGap(this)">3%</div>
   <div class="ftag"    data-g="5"  onclick="toggleGap(this)">5%</div>
   <div class="ftag"    data-g="10" onclick="toggleGap(this)">10%</div>
   <div class="ftag"    data-g="15" onclick="toggleGap(this)">15%</div>
   <div class="ftag"    data-g="20" onclick="toggleGap(this)">20%</div>
-  <div class="ftag"    data-g="0"  onclick="toggleGap(this)">TUTTI</div>
+  <div class="ftag"    data-g="0"  onclick="toggleGap(this)">–</div>
   <div class="vsep"></div>
-  <div class="flabel">MIN RVOL:</div>
-  <div class="ftag on" data-rv="0"  onclick="toggleRvol(this)">TUTTI</div>
+  <div class="flabel">RVOL:</div>
+  <div class="ftag on" data-rv="0"  onclick="toggleRvol(this)">–</div>
   <div class="ftag"    data-rv="2"  onclick="toggleRvol(this)">2x</div>
   <div class="ftag"    data-rv="5"  onclick="toggleRvol(this)">5x</div>
   <div class="ftag"    data-rv="10" onclick="toggleRvol(this)">10x</div>
   <div class="vsep"></div>
-  <div class="flabel">MAX FLOAT:</div>
-  <div class="ftag"    data-fl="5"   onclick="toggleFloat(this)">5M</div>
-  <div class="ftag"    data-fl="10"  onclick="toggleFloat(this)">10M</div>
-  <div class="ftag"    data-fl="20"  onclick="toggleFloat(this)">20M</div>
-  <div class="ftag on" data-fl="0"   onclick="toggleFloat(this)">TUTTI</div>
+  <div class="flabel">FLOAT:</div>
+  <div class="ftag"    data-fl="5"  onclick="toggleFloat(this)">5M</div>
+  <div class="ftag"    data-fl="10" onclick="toggleFloat(this)">10M</div>
+  <div class="ftag"    data-fl="20" onclick="toggleFloat(this)">20M</div>
+  <div class="ftag on" data-fl="0"  onclick="toggleFloat(this)">–</div>
   <div class="vsep"></div>
-  <div class="flabel">PREZZO:</div>
-  <div class="ftag"    data-p="u5"   onclick="togglePrice(this)">SOTTO $5</div>
-  <div class="ftag"    data-p="u10"  onclick="togglePrice(this)">SOTTO $10</div>
-  <div class="ftag on" data-p="u20"  onclick="togglePrice(this)">SOTTO $20</div>
-  <div class="ftag"    data-p="u50"  onclick="togglePrice(this)">$20-$50</div>
-  <div class="ftag"    data-p="any"  onclick="togglePrice(this)">QUALSIASI</div>
+  <div class="flabel">$:</div>
+  <div class="ftag"    data-p="u5"  onclick="togglePrice(this)">$5</div>
+  <div class="ftag"    data-p="u10" onclick="togglePrice(this)">$10</div>
+  <div class="ftag on" data-p="u20" onclick="togglePrice(this)">$20</div>
+  <div class="ftag"    data-p="u50" onclick="togglePrice(this)">$50</div>
+  <div class="ftag"    data-p="any" onclick="togglePrice(this)">∞</div>
   <div style="margin-left:auto">
     <button class="settings-btn" onclick="openSettings()" title="Impostazioni API">⚙</button>
   </div>
@@ -898,6 +930,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const fmp = localStorage.getItem('mi_fmpkey');
   if (fmp) document.getElementById('fmpKeyInput').value = fmp;
   updateKeyStatus();
+  updateFmpDisplay();
 });
 
 function openSettings() {
@@ -960,6 +993,45 @@ function resetCost() {
   sessionCost = 0; sessionCallCount = 0;
   document.getElementById('costVal').textContent = '$0.0000';
   document.getElementById('costVal').style.color = 'var(--amber)';
+}
+
+/* ══════════════════════════════════
+   FMP CALL COUNTER
+   Limite piano gratuito: ~250/giorno
+   Reset automatico a mezzanotte locale
+══════════════════════════════════ */
+function getFmpCountData() {
+  try {
+    const raw = localStorage.getItem('mi_fmpcount');
+    if (!raw) return { count: 0, day: new Date().toDateString() };
+    return JSON.parse(raw);
+  } catch(e) { return { count: 0, day: new Date().toDateString() }; }
+}
+function incrementFmpCount(n = 1) {
+  const today = new Date().toDateString();
+  let d = getFmpCountData();
+  if (d.day !== today) d = { count: 0, day: today }; // reset giornaliero
+  d.count += n;
+  localStorage.setItem('mi_fmpcount', JSON.stringify(d));
+  updateFmpDisplay();
+}
+function updateFmpDisplay() {
+  const d = getFmpCountData();
+  const today = new Date().toDateString();
+  const count = d.day === today ? d.count : 0;
+  const el = document.getElementById('fmpVal');
+  if (!el) return;
+  el.textContent = count;
+  const col = count > 200 ? 'var(--red)' : count > 100 ? 'var(--warn)' : count > 0 ? 'var(--amber)' : 'var(--muted3)';
+  el.style.color = col;
+}
+function resetFmpCount() {
+  const d = getFmpCountData();
+  const today = new Date().toDateString();
+  const count = d.day === today ? d.count : 0;
+  if (!confirm(`Azzera contatore FMP?\nOggi: ${count} chiamate`)) return;
+  localStorage.setItem('mi_fmpcount', JSON.stringify({ count: 0, day: today }));
+  updateFmpDisplay();
 }
 
 /* ══════════════════════════════════
@@ -1156,6 +1228,8 @@ async function fetchFmpGainers() {
     if (!r.ok) return [];
     const data = await r.json();
     if (!Array.isArray(data)) return [];
+
+    incrementFmpCount(1); // 1 chiamata API
 
     return data
       .filter(q => q.symbol && q.price > 0)
