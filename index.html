@@ -1223,7 +1223,8 @@ async function fetchFmpGainers() {
 
   try {
     setScanStatus('Recupero FMP micro-cap gainers...');
-    const url = `https://financialmodelingprep.com/stable/gainers?apikey=${fmpKey}`;
+    // Passa dal proxy Netlify — CORS fix
+    const url = `/.netlify/functions/fmp?endpoint=gainers&apikey=${fmpKey}`;
     const r = await fetchWithTimeout(url, 12000);
     if (!r.ok) return [];
     const data = await r.json();
