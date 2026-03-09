@@ -544,7 +544,126 @@ body {
 }
 .src-link:hover { border-color: var(--blue); }
 
-/* ── TOAST ── */
+/* ── SETTINGS PANEL ── */
+.settings-btn {
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  color: var(--muted3);
+  font-size: 14px;
+  width: 28px; height: 28px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .15s, border-color .15s;
+}
+.settings-btn:hover { color: var(--amber); border-color: var(--amber); }
+
+.settings-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 100;
+  align-items: center; justify-content: center;
+}
+.settings-overlay.open { display: flex; }
+.settings-panel {
+  background: var(--s2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 24px;
+  width: 420px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.sp-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  color: var(--amber);
+  letter-spacing: 2px;
+}
+.sp-field { display: flex; flex-direction: column; gap: 6px; }
+.sp-label { font-size: 9px; color: var(--muted2); text-transform: uppercase; letter-spacing: 1.5px; }
+.sp-input {
+  background: var(--s3);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+.sp-input:focus { border-color: var(--amber); }
+.sp-input::placeholder { color: var(--muted2); }
+.sp-status { font-size: 9px; color: var(--muted3); }
+.sp-status.ok  { color: var(--green); }
+.sp-status.err { color: var(--red); }
+.sp-row { display: flex; gap: 10px; justify-content: flex-end; }
+.sp-btn {
+  background: var(--amber); color: #000;
+  border: none; border-radius: 2px;
+  padding: 6px 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  cursor: pointer; letter-spacing: 1px;
+}
+.sp-btn-sec {
+  background: transparent; color: var(--muted3);
+  border: 1px solid var(--border2); border-radius: 2px;
+  padding: 6px 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; cursor: pointer;
+}
+.sp-divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+
+/* Chart area */
+.chart-wrap {
+  flex-shrink: 0;
+  position: relative;
+  height: 280px;
+  background: var(--s2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+}
+.chart-wrap iframe {
+  width: 100%; height: 100%;
+  border: none;
+  display: block;
+}
+.chart-placeholder {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px; height: 100%;
+  color: var(--muted2);
+}
+.chart-placeholder-icon { font-size: 28px; opacity: .25; }
+.chart-placeholder-txt  { font-size: 9px; letter-spacing: 1.5px; color: var(--muted2); }
+.chart-expand-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,.6);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  color: var(--muted3);
+  font-size: 10px; padding: 3px 7px;
+  cursor: pointer; z-index: 10;
+  text-decoration: none;
+  letter-spacing: .5px;
+  transition: color .15s, border-color .15s;
+}
+.chart-expand-btn:hover { color: var(--amber); border-color: var(--amber); }
+
+.tv-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  color: var(--muted2);
+  font-size: 9px; letter-spacing: 1px;
+  text-decoration: none;
+  transition: all .15s;
+}
+.tv-btn:hover { color: var(--amber); border-color: var(--amber); }
 .toast {
   position: fixed;
   bottom: 24px;
@@ -621,7 +740,27 @@ body {
   <div class="ftag on" data-p="u20"  onclick="togglePrice(this)">SOTTO $20</div>
   <div class="ftag"    data-p="u50"  onclick="togglePrice(this)">$20-$50</div>
   <div class="ftag"    data-p="any"  onclick="togglePrice(this)">QUALSIASI</div>
-  <input class="api-input" id="apiKeyInput" placeholder="sk-ant-... (API Key Anthropic)" onchange="saveApiKey()" />
+  <div style="margin-left:auto">
+    <button class="settings-btn" onclick="openSettings()" title="Impostazioni API">⚙</button>
+  </div>
+</div>
+
+<!-- SETTINGS OVERLAY -->
+<div class="settings-overlay" id="settingsOverlay" onclick="closeSettingsOutside(event)">
+  <div class="settings-panel">
+    <div class="sp-title">⚙ IMPOSTAZIONI</div>
+    <hr class="sp-divider">
+    <div class="sp-field">
+      <div class="sp-label">Anthropic API Key</div>
+      <input class="sp-input" id="apiKeyInput" placeholder="sk-ant-api03-..." />
+      <div class="sp-status" id="antStatus">Usata per SCAN ROSS e ANALIZZA</div>
+    </div>
+    <hr class="sp-divider">
+    <div class="sp-row">
+      <button class="sp-btn-sec" onclick="closeSettings()">ANNULLA</button>
+      <button class="sp-btn" onclick="saveSettings()">SALVA</button>
+    </div>
+  </div>
 </div>
 
 <!-- MAIN -->
@@ -665,8 +804,17 @@ body {
     <div class="analysis-header">
       <div class="ah-title">ANALISI</div>
       <div class="ah-ticker" id="ahTicker"></div>
+      <div id="tvBtnWrap"></div>
       <div class="pillars-mini" id="pillarsMini"></div>
       <div id="timingChip"></div>
+    </div>
+
+    <!-- GRAFICO TRADINGVIEW -->
+    <div class="chart-wrap" id="chartWrap">
+      <div class="chart-placeholder" id="chartPlaceholder">
+        <div class="chart-placeholder-icon">📈</div>
+        <div class="chart-placeholder-txt">SELEZIONA UN TICKER</div>
+      </div>
     </div>
     <div class="analysis-scroll" id="analysisScroll">
       <div class="state-box" style="height:100%">
@@ -721,17 +869,33 @@ let activeGap      = 3;
 let currentTicker  = null;
 let scanData       = [];
 
-// Carica API key salvata
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('mi_apikey');
-  if (saved) document.getElementById('apiKeyInput').value = saved;
+  const ant = localStorage.getItem('mi_apikey');
+  if (ant) document.getElementById('apiKeyInput').value = ant;
+  updateKeyStatus();
 });
 
-// Salva API key quando cambia
-function saveApiKey() {
-  const v = document.getElementById('apiKeyInput').value.trim();
-  if (v) localStorage.setItem('mi_apikey', v);
+function openSettings() {
+  document.getElementById('settingsOverlay').classList.add('open');
 }
+function closeSettings() {
+  document.getElementById('settingsOverlay').classList.remove('open');
+}
+function closeSettingsOutside(e) {
+  if (e.target === document.getElementById('settingsOverlay')) closeSettings();
+}
+function saveSettings() {
+  const ant = document.getElementById('apiKeyInput').value.trim();
+  if (ant) localStorage.setItem('mi_apikey', ant);
+  updateKeyStatus();
+  closeSettings();
+}
+function updateKeyStatus() {
+  const ant = document.getElementById('apiKeyInput').value.trim();
+  const as  = document.getElementById('antStatus');
+  if (as) { as.textContent = ant ? '✓ Key presente' : '⚠ Necessaria per analisi'; as.className = 'sp-status ' + (ant ? 'ok' : 'err'); }
+}
+function getApiKey() { return localStorage.getItem('mi_apikey') || document.getElementById('apiKeyInput').value.trim(); }
 
 /* ══════════════════════════════════
    COST TRACKING
@@ -873,6 +1037,8 @@ async function runScan() {
     const tickers = await fetchYahooSmallCap();
     document.getElementById('sourceLabel').textContent = 'Yahoo Finance';
     const filtered = applyFilters(tickers);
+    // Calcola Prelim Ross immediatamente per tutti i ticker
+    filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
     scanData = filtered;
     renderTickers(filtered);
   } catch(e) {
@@ -995,8 +1161,57 @@ function fmtVol(v) {
 }
 
 /* ══════════════════════════════════
-   RENDER TICKERS
+   PRELIM ROSS SCORE — calcolato da dati Yahoo
+   4 pillar su 5 (manca Catalyst = solo Claude)
 ══════════════════════════════════ */
+function calcPrelimRoss(t) {
+  let score = 0;
+
+  // 1. FLOAT
+  const f = t.float;
+  if (f) {
+    if      (f < 2e6)  score += 10;
+    else if (f < 5e6)  score += 9;
+    else if (f < 10e6) score += 7;
+    else if (f < 20e6) score += 5;
+    else if (f < 50e6) score += 3;
+    else               score += 1;
+  }
+
+  // 2. PRICE
+  const p = t.price;
+  if      (p >= 1  && p < 3)  score += 9;
+  else if (p >= 3  && p < 10) score += 8;
+  else if (p >= 10 && p < 20) score += 6;
+  else if (p >= 20 && p < 50) score += 3;
+  else if (p < 1)             score += 4;
+  else                        score += 1;
+
+  // 3. GAP%
+  const g = Math.abs(t.chg);
+  if      (g >= 50) score += 10;
+  else if (g >= 30) score += 9;
+  else if (g >= 20) score += 8;
+  else if (g >= 10) score += 6;
+  else if (g >= 5)  score += 4;
+  else              score += 2;
+
+  // 4. RVOL
+  const rv = t.rvol;
+  if (rv) {
+    if      (rv >= 10) score += 10;
+    else if (rv >= 5)  score += 9;
+    else if (rv >= 3)  score += 7;
+    else if (rv >= 2)  score += 5;
+    else               score += 2;
+  }
+
+  // Media su 4 pillar (max 40 → scala a 10)
+  const divisor = (f ? 1 : 0) + 1 + 1 + (rv ? 1 : 0); // pillar con dati
+  return divisor > 0 ? Math.round(score / divisor) : 0;
+}
+
+
 function renderTickers(tickers, fromSort = false) {
   if (!tickers.length) {
     document.getElementById('tickerList').innerHTML = `
@@ -1034,7 +1249,7 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-vol">${fmtVol(t.vol)}</div>
       <div class="tr-float">${t.float ? fmtVol(t.float) : '--'}</div>
       <div class="tr-rvol ${rvolCls}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
-      <div class="tr-ross" id="ross${i}">--</div>
+      <div class="tr-ross" id="ross${i}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${i})">▶ ANALIZZA</button>
     </div>`;
@@ -1061,7 +1276,6 @@ function selectTicker(i) {
   navigator.clipboard.writeText(t.ticker).then(() => {
     showToast(`📋 ${t.ticker} copiato`);
   }).catch(() => {
-    // Fallback per browser che non supportano clipboard API
     const ta = document.createElement('textarea');
     ta.value = t.ticker;
     ta.style.position = 'fixed';
@@ -1073,7 +1287,31 @@ function selectTicker(i) {
     showToast(`📋 ${t.ticker} copiato`);
   });
 
+  // Header
+  document.getElementById('ahTicker').textContent = t.ticker;
+
+  // Bottone apri in TradingView
+  document.getElementById('tvBtnWrap').innerHTML =
+    `<a class="tv-btn" href="https://www.tradingview.com/chart/?symbol=${t.ticker}" target="_blank" title="Apri in TradingView">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      TRADINGVIEW
+    </a>`;
+
+  // Grafico embed
+  loadTVChart(t.ticker);
+
+  // Se ha analisi Claude mostra dettaglio
   if (t._analysis) showRossDetail(t);
+}
+
+function loadTVChart(ticker) {
+  const wrap = document.getElementById('chartWrap');
+  if (!wrap) return;
+  const src = `https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol=${encodeURIComponent(ticker)}&interval=5&hidesidetoolbar=1&hidetoptoolbar=0&symboledit=0&saveimage=0&toolbarbg=131722&studies=[]&theme=dark&style=1&timezone=America%2FNew_York&withdateranges=0&showpopupbutton=0&locale=en`;
+  wrap.innerHTML = `
+    <iframe src="${src}" allowtransparency="true" scrolling="no" allowfullscreen></iframe>
+    <a class="chart-expand-btn" href="https://www.tradingview.com/chart/?symbol=${ticker}" target="_blank">⛶ ESPANDI</a>
+  `;
 }
 
 function showRossDetail(t) {
@@ -1182,7 +1420,7 @@ function sortTable(col) {
     if (col === 'price')  { va = a.price||0; vb = b.price||0; }
     if (col === 'chg')    { va = a.chg||0;   vb = b.chg||0; }
     if (col === 'vol')    { va = a.vol||0;   vb = b.vol||0; }
-    if (col === 'ross')   { va = a._analysis?.rossScore||0; vb = b._analysis?.rossScore||0; }
+    if (col === 'ross')   { va = a._analysis?.rossScore || a._prelimRoss || 0; vb = b._analysis?.rossScore || b._prelimRoss || 0; }
     return sortAsc ? va - vb : vb - va;
   });
 
@@ -1197,7 +1435,7 @@ let rossScanning = false;
 const ROSS_PAGE_SIZE = 10;
 
 async function runRossScan() {
-  const apiKey = document.getElementById('apiKeyInput').value.trim();
+  const apiKey = getApiKey();
   if (!apiKey) {
     alert('Inserisci la API Key Anthropic prima di procedere');
     return;
@@ -1317,7 +1555,7 @@ async function analyzeTickerIdx(idx) {
   selectTicker(idx);
   currentTicker = t.ticker;
 
-  const apiKey = document.getElementById('apiKeyInput').value.trim();
+  const apiKey = getApiKey();
   if (!apiKey) {
     document.getElementById('analysisScroll').innerHTML =
       `<div class="err-box">⚠ Inserisci la tua API Key Anthropic nel campo in alto a destra</div>`;
