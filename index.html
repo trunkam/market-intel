@@ -722,25 +722,29 @@ body {
   <div class="ftag on" id="tagPreMkt" onclick="toggleSession('pre')">PRE-MKT</div>
   <div class="ftag on" id="tagIntra"  onclick="toggleSession('intra')">INTRADAY</div>
   <div class="vsep"></div>
-  <div class="flabel">FILTRO:</div>
-  <div class="ftag on" data-f="gapup"   onclick="toggleF(this)">↑ GAP UP</div>
-  <div class="ftag on" data-f="volume"  onclick="toggleF(this)">VOL ANOMALO</div>
-  <div class="ftag on" data-f="gainers" onclick="toggleF(this)">TOP GAINERS</div>
-  <div class="ftag"    data-f="losers"  onclick="toggleF(this)">TOP LOSERS</div>
+  <div class="flabel">FLOAT MAX:</div>
+  <div class="ftag"    data-fl="5"   onclick="toggleFloat(this)">5M</div>
+  <div class="ftag on" data-fl="10"  onclick="toggleFloat(this)">10M</div>
+  <div class="ftag"    data-fl="20"  onclick="toggleFloat(this)">20M</div>
+  <div class="ftag"    data-fl="50"  onclick="toggleFloat(this)">50M</div>
+  <div class="ftag"    data-fl="0"   onclick="toggleFloat(this)">QUALSIASI</div>
+  <div class="vsep"></div>
+  <div class="flabel">MIN RVOL:</div>
+  <div class="ftag"    data-rv="0"   onclick="toggleRvol(this)">TUTTI</div>
+  <div class="ftag on" data-rv="2"   onclick="toggleRvol(this)">2x</div>
+  <div class="ftag"    data-rv="5"   onclick="toggleRvol(this)">5x</div>
+  <div class="ftag"    data-rv="10"  onclick="toggleRvol(this)">10x</div>
   <div class="vsep"></div>
   <div class="flabel">MIN GAP%:</div>
-  <div class="ftag on" data-g="3"  onclick="toggleGap(this)">3%</div>
+  <div class="ftag on" data-g="0"  onclick="toggleGap(this)">TUTTI</div>
+  <div class="ftag"    data-g="3"  onclick="toggleGap(this)">3%</div>
   <div class="ftag"    data-g="5"  onclick="toggleGap(this)">5%</div>
   <div class="ftag"    data-g="10" onclick="toggleGap(this)">10%</div>
-  <div class="ftag"    data-g="15" onclick="toggleGap(this)">15%</div>
-  <div class="ftag"    data-g="20" onclick="toggleGap(this)">20%</div>
-  <div class="ftag"    data-g="0"  onclick="toggleGap(this)">TUTTI</div>
   <div class="vsep"></div>
   <div class="flabel">PREZZO:</div>
   <div class="ftag"    data-p="u5"   onclick="togglePrice(this)">SOTTO $5</div>
   <div class="ftag"    data-p="u10"  onclick="togglePrice(this)">SOTTO $10</div>
   <div class="ftag on" data-p="u20"  onclick="togglePrice(this)">SOTTO $20</div>
-  <div class="ftag"    data-p="u50"  onclick="togglePrice(this)">$20-$50</div>
   <div class="ftag"    data-p="any"  onclick="togglePrice(this)">QUALSIASI</div>
   <div style="margin-left:auto">
     <button class="settings-btn" onclick="openSettings()" title="Impostazioni API">⚙</button>
@@ -865,10 +869,11 @@ async function fetchYahooViaNetlify(scrId, count=50) {
   if (!r.ok) throw new Error(`Proxy error ${r.status}`);
   return await r.json();
 }
-let activeFilters  = ['gapup','volume','gainers'];
+let activeFloat    = 10;   // float max in milioni (0 = qualsiasi)
+let activeRvol     = 2;    // rvol minimo (0 = tutti)
 let activeSessions = ['pre','intra'];
 let activePrice    = 'u20';
-let activeGap      = 3;
+let activeGap      = 0;    // default TUTTI — volume compensa gap
 let currentTicker  = null;
 let scanData       = [];
 
@@ -996,10 +1001,16 @@ function toggleSession(s) {
   }
 }
 
-function toggleF(el) {
-  const f = el.dataset.f;
-  if (el.classList.contains('on')) { el.classList.remove('on'); activeFilters = activeFilters.filter(x => x !== f); }
-  else { el.classList.add('on'); activeFilters.push(f); }
+function toggleFloat(el) {
+  document.querySelectorAll('[data-fl]').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  activeFloat = parseInt(el.dataset.fl);
+}
+
+function toggleRvol(el) {
+  document.querySelectorAll('[data-rv]').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  activeRvol = parseInt(el.dataset.rv);
 }
 
 function togglePrice(el) {
@@ -1062,23 +1073,30 @@ function setScanStatus(txt) {
   if (el) el.textContent = txt;
 }
 
-// Fetch da Yahoo via Netlify Function — niente CORS
+// Fetch da Yahoo — small_cap_gainers + most_actives sempre, day_gainers come extra
 async function fetchYahooSmallCap() {
   const seen    = new Set();
   const results = [];
 
-  for (const screener of YAHOO_SCREENERS) {
-    setScanStatus(`Recupero ${screener.label}...`);
-    try {
-      const data   = await fetchYahooViaNetlify(screener.id, 50);
-      const quotes = parseYahooQuotes(data);
-      if (quotes.length > 0) {
+  // Fetch parallelo: small_cap_gainers e most_actives sempre insieme
+  const primaryScreeners = [
+    { id: 'small_cap_gainers', label: 'Small Cap Gainers' },
+    { id: 'most_actives',      label: 'Most Actives'      },
+  ];
+
+  setScanStatus('Recupero dati Yahoo Finance...');
+
+  await Promise.all(primaryScreeners.map(async (screener) => {
+    for (const mirror of ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com']) {
+      const url = `${mirror}/v1/finance/screener/predefined/saved?scrIds=${screener.id}&count=50&formatted=false`;
+      try {
+        const data   = await fetchYahooViaNetlify(screener.id, 50);
+        const quotes = parseYahooQuotes(data);
         quotes.forEach(t => { if (!seen.has(t.ticker)) { seen.add(t.ticker); results.push(t); } });
-      }
-    } catch(e) { continue; }
-    // Con small_cap_gainers e risultati sufficienti, non continuare
-    if (screener.id === 'small_cap_gainers' && results.length > 0) break;
-  }
+        break;
+      } catch(e) { continue; }
+    }
+  }));
 
   if (!results.length) throw new Error('Nessun dato disponibile — mercato chiuso o problema connessione');
   return results;
@@ -1122,25 +1140,45 @@ function applyFilters(tickers) {
   let filtered = [...tickers];
 
   // Filtro prezzo
-  if (activePrice === 'u5')       filtered = filtered.filter(t => t.price > 0 && t.price <= 5);
+  if      (activePrice === 'u5')  filtered = filtered.filter(t => t.price > 0 && t.price <= 5);
   else if (activePrice === 'u10') filtered = filtered.filter(t => t.price > 0 && t.price <= 10);
   else if (activePrice === 'u20') filtered = filtered.filter(t => t.price > 0 && t.price <= 20);
-  else if (activePrice === 'u50') filtered = filtered.filter(t => t.price > 0 && t.price <= 50);
 
-  // Filtro gap minimo
-  if (activeGap > 0 && activeFilters.includes('gapup'))
-    filtered = filtered.filter(t => t.chg >= activeGap);
-  else if (activeFilters.includes('gapup') && !activeFilters.includes('losers'))
-    filtered = filtered.filter(t => t.chg >= activeGap);
+  // Filtro float massimo — chiave per Ross
+  if (activeFloat > 0) {
+    filtered = filtered.filter(t => {
+      if (!t.float) return true; // se non abbiamo il dato, non escludiamo
+      return t.float <= activeFloat * 1e6;
+    });
+  }
 
-  // Filtro gainers/losers
-  if (activeFilters.includes('gainers') && !activeFilters.includes('losers') && !activeFilters.includes('gapup'))
-    filtered = filtered.filter(t => t.chg > 0);
-  else if (activeFilters.includes('losers') && !activeFilters.includes('gainers'))
-    filtered = filtered.filter(t => t.chg < 0);
+  // Filtro gap OR rvol — passa se soddisfa almeno una condizione
+  // Logica: gap >= soglia OPPURE rvol >= 5x (volume esplosivo compensa gap basso)
+  const RVOL_OR_THRESHOLD = 5; // sopra questo RVOL passa anche con gap basso
+  if (activeGap > 0) {
+    filtered = filtered.filter(t =>
+      t.chg >= activeGap || (t.rvol && t.rvol >= RVOL_OR_THRESHOLD)
+    );
+  }
 
-  // Ordina per variazione % assoluta
-  filtered.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
+  // Filtro RVOL minimo
+  if (activeRvol > 0) {
+    filtered = filtered.filter(t => {
+      if (!t.rvol) return false; // se non abbiamo RVOL, escludiamo
+      return t.rvol >= activeRvol;
+    });
+  }
+
+  // Solo gainers (chg > 0)
+  filtered = filtered.filter(t => t.chg > 0);
+
+  // Ordina per RVOL desc (volume esplosivo prima), poi per gap%
+  filtered.sort((a, b) => {
+    const rvolA = a.rvol || 0;
+    const rvolB = b.rvol || 0;
+    if (rvolB !== rvolA) return rvolB - rvolA;
+    return Math.abs(b.chg) - Math.abs(a.chg);
+  });
 
   return filtered;
 }
