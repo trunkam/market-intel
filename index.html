@@ -742,6 +742,12 @@ body {
   <div class="ftag"    data-rv="5"  onclick="toggleRvol(this)">5x</div>
   <div class="ftag"    data-rv="10" onclick="toggleRvol(this)">10x</div>
   <div class="vsep"></div>
+  <div class="flabel">MAX FLOAT:</div>
+  <div class="ftag"    data-fl="5"   onclick="toggleFloat(this)">5M</div>
+  <div class="ftag"    data-fl="10"  onclick="toggleFloat(this)">10M</div>
+  <div class="ftag"    data-fl="20"  onclick="toggleFloat(this)">20M</div>
+  <div class="ftag on" data-fl="0"   onclick="toggleFloat(this)">TUTTI</div>
+  <div class="vsep"></div>
   <div class="flabel">PREZZO:</div>
   <div class="ftag"    data-p="u5"   onclick="togglePrice(this)">SOTTO $5</div>
   <div class="ftag"    data-p="u10"  onclick="togglePrice(this)">SOTTO $10</div>
@@ -762,6 +768,12 @@ body {
       <div class="sp-label">Anthropic API Key</div>
       <input class="sp-input" id="apiKeyInput" placeholder="sk-ant-api03-..." />
       <div class="sp-status" id="antStatus">Usata per SCAN ROSS e ANALIZZA</div>
+    </div>
+    <hr class="sp-divider">
+    <div class="sp-field">
+      <div class="sp-label">FMP API Key <span style="color:var(--muted3);font-size:9px">(screener micro-cap)</span></div>
+      <input class="sp-input" id="fmpKeyInput" placeholder="la tua FMP key..." />
+      <div class="sp-status" id="fmpStatus">Aggiunge ticker micro-float da FMP gainers</div>
     </div>
     <hr class="sp-divider">
     <div class="sp-row">
@@ -876,12 +888,15 @@ let activeSessions = ['pre','intra'];
 let activePrice    = 'u20';
 let activeGap      = 3;
 let activeRvol     = 0; // default TUTTI — non filtra
+let activeFloat    = 0; // default TUTTI — non filtra per float
 let currentTicker  = null;
 let scanData       = [];
 
 window.addEventListener('DOMContentLoaded', () => {
   const ant = localStorage.getItem('mi_apikey');
   if (ant) document.getElementById('apiKeyInput').value = ant;
+  const fmp = localStorage.getItem('mi_fmpkey');
+  if (fmp) document.getElementById('fmpKeyInput').value = fmp;
   updateKeyStatus();
 });
 
@@ -897,13 +912,24 @@ function closeSettingsOutside(e) {
 function saveSettings() {
   const ant = document.getElementById('apiKeyInput').value.trim();
   if (ant) localStorage.setItem('mi_apikey', ant);
+  const fmp = document.getElementById('fmpKeyInput').value.trim();
+  if (fmp) localStorage.setItem('mi_fmpkey', fmp);
   updateKeyStatus();
   closeSettings();
+}
+function getFmpKey() { return localStorage.getItem('mi_fmpkey') || document.getElementById('fmpKeyInput')?.value?.trim() || ''; }
+function toggleFloat(el) {
+  document.querySelectorAll('[data-fl]').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  activeFloat = parseInt(el.dataset.fl);
 }
 function updateKeyStatus() {
   const ant = document.getElementById('apiKeyInput').value.trim();
   const as  = document.getElementById('antStatus');
   if (as) { as.textContent = ant ? '✓ Key presente' : '⚠ Necessaria per analisi'; as.className = 'sp-status ' + (ant ? 'ok' : 'err'); }
+  const fmp = document.getElementById('fmpKeyInput')?.value?.trim();
+  const fs  = document.getElementById('fmpStatus');
+  if (fs) { fs.textContent = fmp ? '✓ Key presente — screener micro-cap attivo' : 'Opzionale — aggiunge ticker FMP gainers'; fs.className = 'sp-status ' + (fmp ? 'ok' : ''); }
 }
 function getApiKey() { return localStorage.getItem('mi_apikey') || document.getElementById('apiKeyInput').value.trim(); }
 
@@ -1046,14 +1072,29 @@ async function runScan() {
     <div class="state-box">
       <div class="spin"></div>
       <div class="state-title">SCANSIONE IN CORSO</div>
-      <div class="state-sub" id="scanStatus">Connessione a Yahoo Finance...</div>
+      <div class="state-sub" id="scanStatus">Connessione a Yahoo + FMP...</div>
     </div>`;
 
   try {
-    const tickers = await fetchYahooSmallCap();
-    document.getElementById('sourceLabel').textContent = 'Yahoo Finance';
-    const filtered = applyFilters(tickers);
-    // Calcola Prelim Ross immediatamente per tutti i ticker
+    // Doppio screener in parallelo — Yahoo + FMP (se key presente)
+    const [yahooTickers, fmpTickers] = await Promise.all([
+      fetchYahooSmallCap(),
+      fetchFmpGainers(),
+    ]);
+
+    // Merge deduplicato — FMP prima (micro-float), poi Yahoo
+    const seen = new Set();
+    const merged = [];
+    [...fmpTickers, ...yahooTickers].forEach(t => {
+      if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
+    });
+
+    const sourceLabel = fmpTickers.length > 0
+      ? `Yahoo + FMP (${merged.length} ticker)`
+      : `Yahoo Finance (${merged.length} ticker)`;
+    document.getElementById('sourceLabel').textContent = sourceLabel;
+
+    const filtered = applyFilters(merged);
     filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
     scanData = filtered;
     renderTickers(filtered);
@@ -1099,6 +1140,50 @@ async function fetchYahooSmallCap() {
 
   if (!results.length) throw new Error('Nessun dato disponibile — mercato chiuso o problema connessione');
   return results;
+}
+
+// ── FMP Gainers — screener micro-cap supplementare ──
+// Usa FMP /stable/gainers — restituisce anche micro-float che Yahoo esclude
+// Silenzioso se key non presente o errore (non blocca lo scan)
+async function fetchFmpGainers() {
+  const fmpKey = getFmpKey();
+  if (!fmpKey) return []; // key non presente — skip silenzioso
+
+  try {
+    setScanStatus('Recupero FMP micro-cap gainers...');
+    const url = `https://financialmodelingprep.com/stable/gainers?apikey=${fmpKey}`;
+    const r = await fetchWithTimeout(url, 12000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
+
+    return data
+      .filter(q => q.symbol && q.price > 0)
+      .map(q => {
+        const price = q.price || 0;
+        const chg   = q.changesPercentage || 0;
+        return {
+          ticker:      q.symbol,
+          name:        (q.name || '').substring(0, 40),
+          price:       price,
+          chg:         chg,
+          vol:         q.volume || null,
+          avgVol:      q.avgVolume || null,
+          float:       null, // FMP gainers non ha float — verrà da shares-float se enrich
+          rvol:        (q.volume && q.avgVolume && q.avgVolume > 0) ? (q.volume / q.avgVolume) : null,
+          mktCap:      q.marketCap || null,
+          prePrice:    null,
+          preChg:      null,
+          preTime:     null,
+          marketState: 'REGULAR',
+          hasPrePost:  false,
+          source:      'FMP',
+        };
+      })
+      .filter(t => t.price > 0 && t.chg > 3); // almeno +3% per rilevanza
+  } catch(e) {
+    return []; // fallimento silenzioso — Yahoo rimane fonte principale
+  }
 }
 
 // Parse quotes da risposta Yahoo
@@ -1161,8 +1246,16 @@ function applyFilters(tickers) {
     filtered = filtered.filter(t => !t.rvol || t.rvol >= activeRvol);
   }
 
-  // Ordina: RVOL desc prima (se disponibile), poi gap%
+  // Filtro MAX FLOAT — escludi se float noto e supera soglia
+  if (activeFloat > 0) {
+    filtered = filtered.filter(t => !t.float || t.float <= activeFloat * 1e6);
+  }
+
+  // Ordina: prima i micro-float (<10M) poi per RVOL desc, poi gap%
   filtered.sort((a, b) => {
+    const microA = a.float && a.float < 10e6 ? 1 : 0;
+    const microB = b.float && b.float < 10e6 ? 1 : 0;
+    if (microB !== microA) return microB - microA;
     const rA = a.rvol || 0;
     const rB = b.rvol || 0;
     if (rB !== rA) return rB - rA;
@@ -1277,7 +1370,7 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
       <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
       <div class="tr-vol">${fmtVol(t.vol)}</div>
-      <div class="tr-float">${t.float ? fmtVol(t.float) : '--'}</div>
+      <div class="tr-float" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
       <div class="tr-rvol ${rvolCls}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
       <div class="tr-ross" id="ross${i}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
