@@ -1148,23 +1148,25 @@ async function runScan() {
     </div>`;
 
   try {
-    // Doppio screener in parallelo — Yahoo + FMP (se key presente)
-    const [yahooTickers, fmpTickers] = await Promise.all([
+    // Triplo screener in parallelo — Yahoo predefined + Yahoo micro-float + FMP
+    const [yahooTickers, microTickers, fmpTickers] = await Promise.all([
       fetchYahooSmallCap(),
+      fetchYahooMicro(),
       fetchFmpGainers(),
     ]);
 
-    // Merge deduplicato — FMP prima (micro-float), poi Yahoo
+    // Merge deduplicato — micro-float prima (più vicini a Ross), poi FMP, poi Yahoo
     const seen = new Set();
     const merged = [];
-    [...fmpTickers, ...yahooTickers].forEach(t => {
+    [...microTickers, ...fmpTickers, ...yahooTickers].forEach(t => {
       if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
     });
 
-    const sourceLabel = fmpTickers.length > 0
-      ? `Yahoo + FMP (${merged.length} ticker)`
-      : `Yahoo Finance (${merged.length} ticker)`;
-    document.getElementById('sourceLabel').textContent = sourceLabel;
+    const parts = [];
+    if (microTickers.length) parts.push(`Yahoo μ-float: ${microTickers.length}`);
+    if (fmpTickers.length)   parts.push(`FMP: ${fmpTickers.length}`);
+    if (yahooTickers.length) parts.push(`Yahoo: ${yahooTickers.length}`);
+    document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     const filtered = applyFilters(merged);
     filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
@@ -1214,7 +1216,46 @@ async function fetchYahooSmallCap() {
   return results;
 }
 
-// ── FMP Gainers — screener micro-cap supplementare ──
+// ── Yahoo Custom Screener — micro-float ──────────────────────
+// Chiama il proxy in modalità POST con filtro floatShares < 10M
+// Cattura ticker come ATRA, EPSM, ACXP che i predefined non vedono
+async function fetchYahooMicro() {
+  try {
+    setScanStatus('Recupero Yahoo micro-float (<10M)...');
+    const url = `${NETLIFY_PROXY}?mode=micro`;
+    const r = await fetchWithTimeout(url, 15000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (data.error) return []; // crumb non disponibile o altro errore
+
+    // Stessa struttura della risposta Yahoo predefined
+    const quotes = data?.finance?.result?.[0]?.quotes || [];
+    if (!quotes.length) return [];
+
+    return quotes.map(q => {
+      const vol    = q.regularMarketVolume || null;
+      const avgVol = q.averageDailyVolume3Month || null;
+      const rvol   = (vol && avgVol && avgVol > 0) ? (vol / avgVol) : null;
+      const float  = q.floatShares || q.sharesOutstanding || null;
+      return {
+        ticker:      q.symbol || '',
+        name:        (q.longName || q.shortName || '').substring(0, 40),
+        price:       q.regularMarketPrice || 0,
+        chg:         q.regularMarketChangePercent || 0,
+        vol, avgVol, float, rvol,
+        mktCap:      q.marketCap || null,
+        prePrice:    q.preMarketPrice || null,
+        preChg:      q.preMarketChangePercent || null,
+        preTime:     q.preMarketTime || null,
+        marketState: q.marketState || 'REGULAR',
+        hasPrePost:  q.hasPrePostMarketData || false,
+        source:      'Yahoo-μ',
+      };
+    }).filter(t => t.ticker && t.price > 0);
+  } catch(e) {
+    return []; // silenzioso — non blocca lo scan
+  }
+}
 // Usa FMP /stable/gainers — restituisce anche micro-float che Yahoo esclude
 // Silenzioso se key non presente o errore (non blocca lo scan)
 async function fetchFmpGainers() {
@@ -1223,8 +1264,8 @@ async function fetchFmpGainers() {
 
   try {
     setScanStatus('Recupero FMP micro-cap gainers...');
-    // Passa dal proxy Netlify — CORS fix
-    const url = `/.netlify/functions/fmp?endpoint=gainers&apikey=${fmpKey}`;
+    // Passa dal proxy Netlify — CORS fix (stesso file yahoo-proxy)
+    const url = `/.netlify/functions/yahoo-proxy?mode=fmp&endpoint=gainers&apikey=${fmpKey}`;
     const r = await fetchWithTimeout(url, 12000);
     if (!r.ok) return [];
     const data = await r.json();
