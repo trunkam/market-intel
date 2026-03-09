@@ -439,6 +439,8 @@ body {
   border-radius: 3px;
   padding: 6px 4px;
   text-align: center;
+  min-width: 0;
+  overflow: hidden;
 }
 .pgc-name { font-size: 7px; color: var(--muted2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
 .pgc-val  { font-family: 'Bebas Neue', sans-serif; font-size: 20px; }
@@ -663,11 +665,11 @@ body {
           Volume · Setup
         </div>
         <div class="pillars-grid" style="width:100%;max-width:280px;margin-top:8px">
-          ${['FLOAT','CATAL','PRICE','VOL','SETUP'].map(p=>`
-          <div class="pg-cell">
-            <div class="pgc-name">${p}</div>
-            <div class="pgc-val pv-na">?</div>
-          </div>`).join('')}
+          <div class="pg-cell"><div class="pgc-name">FLOAT</div><div class="pgc-val pv-na">?</div></div>
+          <div class="pg-cell"><div class="pgc-name">CATAL</div><div class="pgc-val pv-na">?</div></div>
+          <div class="pg-cell"><div class="pgc-name">PRICE</div><div class="pgc-val pv-na">?</div></div>
+          <div class="pg-cell"><div class="pgc-name">VOL</div><div class="pgc-val pv-na">?</div></div>
+          <div class="pg-cell"><div class="pgc-name">SETUP</div><div class="pgc-val pv-na">?</div></div>
         </div>
       </div>
     </div>
@@ -679,13 +681,7 @@ body {
 /* ══════════════════════════════════
    CONFIG
 ══════════════════════════════════ */
-const CORS_PROXIES = [
-  'https://api.allorigins.win/get?url=',
-  'https://corsproxy.io/?',
-  'https://api.codetabs.com/v1/proxy?quest=',
-  'https://thingproxy.freeboard.io/fetch/',
-  'https://api.allorigins.win/raw?url=',
-];
+const NETLIFY_PROXY = '/.netlify/functions/yahoo-proxy';
 
 async function fetchWithTimeout(url, ms=15000) {
   const controller = new AbortController();
@@ -694,29 +690,12 @@ async function fetchWithTimeout(url, ms=15000) {
     .finally(() => clearTimeout(timer));
 }
 
-async function fetchViaProxy(targetUrl, ms=15000) {
-  // Prima prova i proxy
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const proxyUrl = proxy + encodeURIComponent(targetUrl);
-      const r = await fetchWithTimeout(proxyUrl, ms);
-      if (!r.ok) continue;
-      const d = await r.json();
-      const body = d.contents || d.body || (typeof d === 'string' ? d : JSON.stringify(d));
-      if (body && body.length > 100) return body;
-    } catch(e) { continue; }
-  }
-
-  // Fallback: chiamata diretta (funziona su alcuni browser/domini)
-  try {
-    const r = await fetchWithTimeout(targetUrl, ms);
-    if (r.ok) {
-      const text = await r.text();
-      if (text && text.length > 100) return text;
-    }
-  } catch(e) { /* CORS bloccato */ }
-
-  return null;
+// Chiama il nostro proxy Netlify — niente CORS, niente proxy pubblici
+async function fetchYahooViaNetlify(scrId, count=50) {
+  const url = `${NETLIFY_PROXY}?scrId=${scrId}&count=${count}`;
+  const r = await fetchWithTimeout(url, 15000);
+  if (!r.ok) throw new Error(`Proxy error ${r.status}`);
+  return await r.json();
 }
 let activeFilters  = ['gapup','volume','gainers'];
 let activeSessions = ['pre','intra'];
@@ -856,16 +835,10 @@ function toggleGap(el) {
 ══════════════════════════════════ */
 
 // Yahoo screener IDs da provare in ordine
-// small_cap_gainers = marketCap<2B, NMS+NYQ, >5% change — IDEALE per Ross
 const YAHOO_SCREENERS = [
   { id: 'small_cap_gainers', label: 'Small Cap Gainers' },
   { id: 'day_gainers',       label: 'Day Gainers'       },
   { id: 'most_actives',      label: 'Most Actives'      },
-];
-
-const YAHOO_MIRRORS = [
-  'https://query1.finance.yahoo.com',
-  'https://query2.finance.yahoo.com',
 ];
 
 async function runScan() {
@@ -903,74 +876,58 @@ function setScanStatus(txt) {
   if (el) el.textContent = txt;
 }
 
-// Fetch da Yahoo — prova prima small_cap_gainers, poi fallback
+// Fetch da Yahoo via Netlify Function — niente CORS
 async function fetchYahooSmallCap() {
   const seen    = new Set();
   const results = [];
 
   for (const screener of YAHOO_SCREENERS) {
     setScanStatus(`Recupero ${screener.label}...`);
-    for (const mirror of YAHOO_MIRRORS) {
-      const url = `${mirror}/v1/finance/screener/predefined/saved?scrIds=${screener.id}&count=50&formatted=false`;
-      try {
-        const quotes = await fetchYahooQuotes(url);
-        if (quotes.length > 0) {
-          quotes.forEach(t => { if (!seen.has(t.ticker)) { seen.add(t.ticker); results.push(t); } });
-          break; // mirror funzionante, passa al prossimo screener
-        }
-      } catch(e) { continue; }
-    }
-    // Con small_cap_gainers abbiamo già quello che serve, non aggiungere gli altri
-    // a meno che non abbia dato zero risultati
+    try {
+      const data   = await fetchYahooViaNetlify(screener.id, 50);
+      const quotes = parseYahooQuotes(data);
+      if (quotes.length > 0) {
+        quotes.forEach(t => { if (!seen.has(t.ticker)) { seen.add(t.ticker); results.push(t); } });
+      }
+    } catch(e) { continue; }
+    // Con small_cap_gainers e risultati sufficienti, non continuare
     if (screener.id === 'small_cap_gainers' && results.length > 0) break;
   }
 
-  if (!results.length) throw new Error('Yahoo Finance non raggiungibile — verifica connessione e riprova');
+  if (!results.length) throw new Error('Nessun dato disponibile — mercato chiuso o problema connessione');
   return results;
 }
 
-// Parse quotes da risposta Yahoo — estrae tutti i campi utili per Ross
-async function fetchYahooQuotes(url) {
-  const body = await fetchViaProxy(url, 15000);
-  if (!body) return [];
-  const data   = typeof body === 'string' ? JSON.parse(body) : body;
+// Parse quotes da risposta Yahoo
+function parseYahooQuotes(data) {
   const quotes = data?.finance?.result?.[0]?.quotes || [];
-
-  const ms = marketStatus(); // 'pre' | 'open' | 'after' | 'closed'
+  const ms = marketStatus();
 
   return quotes.map(q => {
-    // Prezzi: durante pre-market mostra prezzo pre-market se disponibile
     const isPreSession  = ms === 'pre' && q.preMarketPrice && q.hasPrePostMarketData;
-    const displayPrice  = isPreSession ? q.preMarketPrice  : (q.regularMarketPrice  || 0);
+    const displayPrice  = isPreSession ? q.preMarketPrice : (q.regularMarketPrice || 0);
     const displayChg    = isPreSession ? (q.preMarketChangePercent || 0) : (q.regularMarketChangePercent || 0);
-
-    // Volume: usa quello della sessione corrente
     const vol           = q.regularMarketVolume || null;
     const avgVol        = q.averageDailyVolume3Month || null;
-
-    // RVOL calcolato localmente — niente chiamate extra!
     const rvol          = (vol && avgVol && avgVol > 0) ? (vol / avgVol) : null;
-
-    // Float: Yahoo restituisce sharesOutstanding come approssimazione
     const float         = q.floatShares || q.sharesOutstanding || null;
 
     return {
-      ticker:         q.symbol || '',
-      name:           (q.longName || q.shortName || '').substring(0, 40),
-      price:          displayPrice,
-      chg:            displayChg,
-      vol:            vol,
-      avgVol:         avgVol,
-      float:          float,
-      rvol:           rvol,
-      mktCap:         q.marketCap || null,
-      // Dati pre-market extra (visibili in tabella durante sessione PRE)
-      prePrice:       q.preMarketPrice       || null,
-      preChg:         q.preMarketChangePercent || null,
-      preTime:        q.preMarketTime        || null,
-      marketState:    q.marketState          || 'CLOSED',
-      hasPrePost:     q.hasPrePostMarketData || false,
-      source:         'Yahoo',
+      ticker:      q.symbol || '',
+      name:        (q.longName || q.shortName || '').substring(0, 40),
+      price:       displayPrice,
+      chg:         displayChg,
+      vol:         vol,
+      avgVol:      avgVol,
+      float:       float,
+      rvol:        rvol,
+      mktCap:      q.marketCap || null,
+      prePrice:    q.preMarketPrice || null,
+      preChg:      q.preMarketChangePercent || null,
+      preTime:     q.preMarketTime || null,
+      marketState: q.marketState || 'CLOSED',
+      hasPrePost:  q.hasPrePostMarketData || false,
+      source:      'Yahoo',
     };
   }).filter(t => t.ticker && t.price > 0);
 }
