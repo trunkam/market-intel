@@ -907,7 +907,7 @@ body {
       <div class="sh-source">Fonte: <span id="sourceLabel">--</span></div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
         <span id="selCount" style="font-size:9px;color:var(--muted3)"></span>
-        <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">🔄 FLOAT (<span id="floatBtnN">0</span>)</button>
+        <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">⚡ FMP (<span id="floatBtnN">0</span>)</button>
       </div>
     </div>
     <div class="tbl-head">
@@ -1258,6 +1258,9 @@ async function runScan() {
     filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
     scanData = filtered;
     renderTickers(filtered);
+
+    // Auto-enrich float+rvol via Yahoo — 0 chiamate FMP
+    autoEnrichYahoo(filtered);
   } catch(e) {
     document.getElementById('tickerList').innerHTML = `
       <div class="state-box">
@@ -1575,9 +1578,9 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-ticker">${t.ticker}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
       <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
-      <div class="tr-vol">${fmtVol(t.vol)}</div>
-      <div class="tr-float" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
-      <div class="tr-rvol ${rvolCls}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
+      <div class="tr-vol" id="vol${i}">${fmtVol(t.vol)}</div>
+      <div class="tr-float" id="float${i}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
+      <div class="tr-rvol ${rvolCls}" id="rvol${i}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
       <div class="tr-ross" id="ross${i}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${i})">▶ ANALIZZA</button>
@@ -1615,6 +1618,98 @@ function toggleCheckAll(masterCb) {
   updateFloatBtn();
 }
 
+/* ══════════════════════════════════
+   ENRICH YAHOO — float + vol + rvol
+   Nessuna chiamata FMP — gratuito
+══════════════════════════════════ */
+async function enrichSingleYahoo(idx) {
+  const t = scanData[idx];
+  if (!t) return false;
+
+  try {
+    const url = `${NETLIFY_PROXY}?mode=quotesummary&symbol=${t.ticker}`;
+    const r = await fetchWithTimeout(url, 12000);
+    if (!r.ok) return false;
+
+    const data = await r.json();
+    const ks = data?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
+    const sd = data?.quoteSummary?.result?.[0]?.summaryDetail;
+    if (!ks && !sd) return false;
+
+    const floatShares = ks?.floatShares?.raw || null;
+    const avgVol      = sd?.averageVolume?.raw || sd?.averageDailyVolume10Day?.raw || null;
+    const vol         = sd?.volume?.raw || null;
+    const rvol        = (vol && avgVol && avgVol > 0) ? vol / avgVol : null;
+
+    let enriched = false;
+
+    if (floatShares) {
+      scanData[idx].float = floatShares;
+      const floatCell = document.getElementById(`float${idx}`);
+      if (floatCell) {
+        const isMicro = floatShares < 10e6;
+        floatCell.style.color      = isMicro ? 'var(--green)' : '';
+        floatCell.style.fontWeight = isMicro ? 'bold' : '';
+        floatCell.textContent      = fmtVol(floatShares);
+      }
+      enriched = true;
+    }
+
+    if (vol && !scanData[idx].vol) {
+      scanData[idx].vol = vol;
+      const volCell = document.getElementById(`vol${idx}`);
+      if (volCell) volCell.textContent = fmtVol(vol);
+    }
+
+    if (rvol) {
+      scanData[idx].rvol = rvol;
+      const rvolCell = document.getElementById(`rvol${idx}`);
+      if (rvolCell) {
+        rvolCell.textContent = rvol.toFixed(1) + 'x';
+        rvolCell.className   = `tr-rvol ${rvol >= 3 ? 'rvol-hi' : 'rvol-mid'}`;
+      }
+      enriched = true;
+    }
+
+    if (enriched) {
+      scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+      updatePrelimRossCell(idx, scanData[idx]);
+      // Rimuovi checkbox se tutti i dati ora presenti
+      if (scanData[idx].float && scanData[idx].rvol) {
+        const cb = document.getElementById(`chk${idx}`);
+        if (cb) cb.parentElement.innerHTML = '';
+      }
+    }
+
+    return enriched;
+  } catch(e) { return false; }
+}
+
+// Auto-enrich post-scan — Yahoo, silenzioso, batch da 3
+async function autoEnrichYahoo(tickers) {
+  const toEnrich = tickers
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => !t.float || !t.rvol);
+
+  if (!toEnrich.length) return;
+
+  setScanStatus(`Enrich dati: 0/${toEnrich.length}...`);
+
+  const BATCH = 3;
+  let done = 0;
+  for (let b = 0; b < toEnrich.length; b += BATCH) {
+    const group = toEnrich.slice(b, b + BATCH);
+    await Promise.allSettled(group.map(({ i }) => enrichSingleYahoo(i)));
+    done += group.length;
+    setScanStatus(`Enrich dati: ${Math.min(done, toEnrich.length)}/${toEnrich.length}...`);
+    if (b + BATCH < toEnrich.length) await sleep(600);
+  }
+
+  setScanStatus(`✓ ${scanData.length} ticker — dati aggiornati`);
+  updateFloatBtn(); // aggiorna bottone FMP dopo enrich Yahoo
+}
+
+// Bottone FLOAT manuale — FMP fallback per ticker che Yahoo non riesce
 async function runFloatEnrich() {
   const fmpKey = getFmpKey();
   if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
@@ -1624,7 +1719,7 @@ async function runFloatEnrich() {
 
   const btn = document.getElementById('floatBtn');
   btn.disabled = true;
-  btn.textContent = '⏳ aggiornamento...';
+  btn.textContent = `⏳ 0/${indices.length}`;
 
   let updated = 0;
   for (let i = 0; i < indices.length; i++) {
@@ -1632,47 +1727,50 @@ async function runFloatEnrich() {
     const t = scanData[idx];
     if (!t) continue;
 
+    btn.textContent = `⏳ ${i+1}/${indices.length}`;
+
     try {
-      const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
-      const r = await fetchWithTimeout(url, 10000);
-      if (r.ok) {
-        const data = await r.json();
-        // FMP shares-float restituisce array con un oggetto
-        const item = Array.isArray(data) ? data[0] : data;
-        if (item && item.floatShares) {
-          scanData[idx].float = item.floatShares;
-          scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
-          // Aggiorna cella float nella tabella
-          const row = document.getElementById(`tr${idx}`);
-          if (row) {
-            const floatCell = row.querySelectorAll('div')[4]; // 0=check,1=ticker,2=price,3=chg,4=vol,5=float
-            const floatVal = item.floatShares;
-            const isMicro = floatVal < 10e6;
+      // Prima prova Yahoo
+      const yahooOk = await enrichSingleYahoo(idx);
+      if (yahooOk) { updated++; incrementFmpCount(0); }
+      else {
+        // Fallback FMP shares-float
+        const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
+        const r = await fetchWithTimeout(url, 10000);
+        if (r.ok) {
+          const data = await r.json();
+          const item = Array.isArray(data) ? data[0] : data;
+          if (item && item.floatShares) {
+            scanData[idx].float = item.floatShares;
+            scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+            const floatCell = document.getElementById(`float${idx}`);
             if (floatCell) {
-              floatCell.style.color = isMicro ? 'var(--green)' : '';
+              const isMicro = item.floatShares < 10e6;
+              floatCell.style.color      = isMicro ? 'var(--green)' : '';
               floatCell.style.fontWeight = isMicro ? 'bold' : '';
-              floatCell.textContent = fmtVol(floatVal);
+              floatCell.textContent      = fmtVol(item.floatShares);
             }
-            // Aggiorna cella ross
             updatePrelimRossCell(idx, scanData[idx]);
+            const cb = document.getElementById(`chk${idx}`);
+            if (cb) cb.parentElement.innerHTML = '';
+            updated++;
+            incrementFmpCount(1);
           }
-          incrementFmpCount(1);
-          updated++;
         }
       }
-    } catch(e) { /* skip ticker con errore */ }
+    } catch(e) { /* skip */ }
 
-    // Delay tra chiamate per non saturare FMP
-    if (i < indices.length - 1) await sleep(300);
+    if (i < indices.length - 1) await sleep(400);
   }
 
   btn.disabled = false;
   btn.style.display = 'none';
   document.getElementById('floatBtnN').textContent = '0';
-  document.getElementById('selCount').textContent = '';
-  // Deseleziona tutti
-  document.querySelectorAll('.row-cb').forEach(cb => cb.checked = false);
-  showToast(`✓ Float aggiornato per ${updated} ticker`);
+  if (document.getElementById('selCount')) document.getElementById('selCount').textContent = '';
+  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
+  const ca = document.getElementById('checkAll');
+  if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
+  showToast(`✓ Dati aggiornati per ${updated}/${indices.length} ticker`);
 }
 
 function showToast(msg) {
