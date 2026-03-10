@@ -53,71 +53,97 @@ exports.handler = async (event) => {
     }
   }
 
-  // ── MODALITÀ YAHOO CUSTOM SCREENER (POST) ─────────────────
-  if (params.mode === 'micro') {
+  // ── MODALITÀ YAHOO QUOTESUMMARY (float + vol + rvol) ──────────
+  if (params.mode === 'quotesummary') {
+    const { symbol } = params;
+    if (!symbol) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbol' }) };
+
+    const yHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+
     try {
-      // Ottieni crumb Yahoo
-      let crumb = null;
-      for (const host of ['query1', 'query2']) {
-        try {
-          const r = await fetch(`https://${host}.finance.yahoo.com/v1/test/csrfToken`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            signal: AbortSignal.timeout(6000),
-          });
-          if (r.ok) {
-            const d = await r.json();
-            crumb = d.query?.crumb || d.crumb || null;
-            if (crumb) break;
-          }
-        } catch(e) {}
+      // Ottieni crumb prima
+      const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/csrfToken', {
+        headers: yHeaders,
+        signal: AbortSignal.timeout(5000),
+      });
+      const setCookie = crumbRes.headers.get('set-cookie') || '';
+      const cookieMatch = setCookie.match(/A1=([^;]+)/);
+      const cookie = cookieMatch ? `A1=${cookieMatch[1]}` : '';
+
+      let crumb = '';
+      try {
+        const crumbText = await crumbRes.text();
+        crumb = crumbText.trim();
+      } catch(e) {}
+
+      // Fallback: prova senza crumb (a volte funziona)
+      const urlBase = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=defaultKeyStatistics,summaryDetail`;
+      const urlWithCrumb = crumb ? `${urlBase}&crumb=${encodeURIComponent(crumb)}` : urlBase;
+
+      const reqHeaders = { ...yHeaders };
+      if (cookie) reqHeaders['Cookie'] = cookie;
+
+      const r = await fetch(urlWithCrumb, {
+        headers: reqHeaders,
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!r.ok) {
+        // Prova query1 senza crumb come ultimo tentativo
+        const r2 = await fetch(
+          `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=defaultKeyStatistics,summaryDetail`,
+          { headers: yHeaders, signal: AbortSignal.timeout(8000) }
+        );
+        if (!r2.ok) return { statusCode: r2.status, headers, body: JSON.stringify({ error: `Yahoo QS error ${r2.status}` }) };
+        const data2 = await r2.json();
+        return { statusCode: 200, headers, body: JSON.stringify(data2) };
       }
 
-      if (!crumb) {
-        return { statusCode: 503, headers, body: JSON.stringify({ error: 'Yahoo crumb non disponibile' }) };
-      }
-
-      const screenerBody = {
-        offset: 0,
-        size: 100,
-        sortField: 'percentchange',
-        sortType: 'DESC',
-        quoteType: 'EQUITY',
-        query: {
-          operator: 'AND',
-          operands: [
-            { operator: 'LT', operands: ['floatShares', 10000000] },
-            { operator: 'GT', operands: ['percentchange', 3] },
-            { operator: 'GT', operands: ['dayvolume', 50000] },
-            { operator: 'GT', operands: ['intradayprice', 0.5] },
-            { operator: 'LT', operands: ['intradayprice', 50] },
-            { operator: 'EQ', operands: ['region', 'us'] },
-          ],
-        },
-        userId: '',
-        userIdType: 'guid',
-      };
-
-      const screenerRes = await fetch(
-        `https://query1.finance.yahoo.com/v1/finance/screener?crumb=${encodeURIComponent(crumb)}&lang=en-US&region=US&formatted=false`,
-        {
-          method: 'POST',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify(screenerBody),
-          signal: AbortSignal.timeout(12000),
-        }
-      );
-
-      if (!screenerRes.ok) {
-        return { statusCode: screenerRes.status, headers, body: JSON.stringify({ error: `Yahoo screener error ${screenerRes.status}` }) };
-      }
-
-      const data = await screenerRes.json();
+      const data = await r.json();
       return { statusCode: 200, headers, body: JSON.stringify(data) };
 
+    } catch(e) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    }
+  }
+
+  // ── MODALITÀ YAHOO MICRO-FLOAT (senza crumb) ────────────────
+  if (params.mode === 'micro') {
+    // Scarica most_actives + small_cap_gainers con count alto, filtra float < 10M lato server
+    try {
+      const urls = [
+        'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=200&formatted=false&lang=en-US&region=US',
+        'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=small_cap_gainers&count=200&formatted=false&lang=en-US&region=US',
+      ];
+      const yHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+      };
+      const results = await Promise.all(urls.map(async url => {
+        try {
+          const r = await fetch(url, { headers: yHeaders, signal: AbortSignal.timeout(10000) });
+          if (!r.ok) return [];
+          const data = await r.json();
+          return data?.finance?.result?.[0]?.quotes || [];
+        } catch(e) { return []; }
+      }));
+      const seen = new Set();
+      const allQuotes = [];
+      results.flat().forEach(q => {
+        if (q.symbol && !seen.has(q.symbol)) { seen.add(q.symbol); allQuotes.push(q); }
+      });
+      // Filtra: tieni solo ticker con float < 10M
+      const micro = allQuotes.filter(q => {
+        const float = q.floatShares || null;
+        return float && float < 10_000_000;
+      });
+      const fakeResult = { finance: { result: [{ quotes: micro }] } };
+      return { statusCode: 200, headers, body: JSON.stringify(fakeResult) };
     } catch (e) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
     }
