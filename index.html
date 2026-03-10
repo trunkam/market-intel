@@ -867,6 +867,13 @@ body {
   <div class="ftag on" data-p="u20" onclick="togglePrice(this)">$20</div>
   <div class="ftag"    data-p="u50" onclick="togglePrice(this)">$50</div>
   <div class="ftag"    data-p="any" onclick="togglePrice(this)">∞</div>
+  <div class="vsep"></div>
+  <div class="flabel">ROSS:</div>
+  <div class="ftag on" data-rs="0"  onclick="toggleRoss(this)">–</div>
+  <div class="ftag"    data-rs="7"  onclick="toggleRoss(this)">≥7</div>
+  <div class="ftag"    data-rs="8"  onclick="toggleRoss(this)">≥8</div>
+  <div class="ftag"    data-rs="9"  onclick="toggleRoss(this)">≥9</div>
+  <div class="ftag"    data-rs="10" onclick="toggleRoss(this)">10</div>
   <div style="margin-left:auto">
     <button class="settings-btn" onclick="openSettings()" title="Impostazioni API">⚙</button>
   </div>
@@ -1005,8 +1012,9 @@ let activeFilters  = ['gapup','volume','gainers'];
 let activeSessions = ['pre','intra'];
 let activePrice    = 'u20';
 let activeGap      = 3;
-let activeRvol     = 0; // default TUTTI — non filtra
-let activeFloat    = 0; // default TUTTI — non filtra per float
+let activeRvol     = 0;
+let activeFloat    = 0;
+let activeRoss     = 0; // default TUTTI — non filtra per score Ross
 let currentTicker  = null;
 let scanData       = [];
 
@@ -1205,6 +1213,13 @@ function toggleGap(el) {
   activeGap = parseInt(el.dataset.g);
 }
 
+function toggleRoss(el) {
+  document.querySelectorAll('[data-rs]').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  activeRoss = parseInt(el.dataset.rs);
+  applyFiltersAndRender();
+}
+
 function toggleRvol(el) {
   document.querySelectorAll('[data-rv]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
@@ -1258,9 +1273,6 @@ async function runScan() {
     filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
     scanData = filtered;
     renderTickers(filtered);
-
-    // Auto-enrich float+rvol via Yahoo — 0 chiamate FMP
-    autoEnrichYahoo(filtered);
   } catch(e) {
     document.getElementById('tickerList').innerHTML = `
       <div class="state-box">
@@ -1456,6 +1468,13 @@ function applyFilters(tickers) {
     filtered = filtered.filter(t => !t.float || t.float <= activeFloat * 1e6);
   }
 
+  if (activeRoss > 0) {
+    filtered = filtered.filter(t => {
+      const score = t._analysis?.rossScore || t._prelimRoss || 0;
+      return score >= activeRoss;
+    });
+  }
+
   // Ordina: prima i micro-float (<10M) poi per RVOL desc, poi gap%
   filtered.sort((a, b) => {
     const microA = a.float && a.float < 10e6 ? 1 : 0;
@@ -1570,7 +1589,7 @@ function renderTickers(tickers, fromSort = false) {
       ? `<div style="font-size:7px;color:var(--amber);letter-spacing:.5px">PRE $${t.prePrice.toFixed(2)}</div>`
       : '';
 
-    const needsEnrich = !t.float || !t.rvol || !t.vol;
+    const needsEnrich = !t.float;
     return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${i})" style="animation-delay:${i*.04}s">
       <div class="tr-check" onclick="event.stopPropagation()">
         ${needsEnrich ? `<input type="checkbox" id="chk${i}" onchange="updateFloatBtn()">` : ''}
@@ -1619,97 +1638,8 @@ function toggleCheckAll(masterCb) {
 }
 
 /* ══════════════════════════════════
-   ENRICH YAHOO — float + vol + rvol
-   Nessuna chiamata FMP — gratuito
+   CHECKBOX + FLOAT ENRICH (FMP)
 ══════════════════════════════════ */
-async function enrichSingleYahoo(idx) {
-  const t = scanData[idx];
-  if (!t) return false;
-
-  try {
-    const url = `${NETLIFY_PROXY}?mode=quotesummary&symbol=${t.ticker}`;
-    const r = await fetchWithTimeout(url, 12000);
-    if (!r.ok) return false;
-
-    const data = await r.json();
-    const ks = data?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
-    const sd = data?.quoteSummary?.result?.[0]?.summaryDetail;
-    if (!ks && !sd) return false;
-
-    const floatShares = ks?.floatShares?.raw || null;
-    const avgVol      = sd?.averageVolume?.raw || sd?.averageDailyVolume10Day?.raw || null;
-    const vol         = sd?.volume?.raw || null;
-    const rvol        = (vol && avgVol && avgVol > 0) ? vol / avgVol : null;
-
-    let enriched = false;
-
-    if (floatShares) {
-      scanData[idx].float = floatShares;
-      const floatCell = document.getElementById(`float${idx}`);
-      if (floatCell) {
-        const isMicro = floatShares < 10e6;
-        floatCell.style.color      = isMicro ? 'var(--green)' : '';
-        floatCell.style.fontWeight = isMicro ? 'bold' : '';
-        floatCell.textContent      = fmtVol(floatShares);
-      }
-      enriched = true;
-    }
-
-    if (vol && !scanData[idx].vol) {
-      scanData[idx].vol = vol;
-      const volCell = document.getElementById(`vol${idx}`);
-      if (volCell) volCell.textContent = fmtVol(vol);
-    }
-
-    if (rvol) {
-      scanData[idx].rvol = rvol;
-      const rvolCell = document.getElementById(`rvol${idx}`);
-      if (rvolCell) {
-        rvolCell.textContent = rvol.toFixed(1) + 'x';
-        rvolCell.className   = `tr-rvol ${rvol >= 3 ? 'rvol-hi' : 'rvol-mid'}`;
-      }
-      enriched = true;
-    }
-
-    if (enriched) {
-      scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
-      updatePrelimRossCell(idx, scanData[idx]);
-      // Rimuovi checkbox se tutti i dati ora presenti
-      if (scanData[idx].float && scanData[idx].rvol) {
-        const cb = document.getElementById(`chk${idx}`);
-        if (cb) cb.parentElement.innerHTML = '';
-      }
-    }
-
-    return enriched;
-  } catch(e) { return false; }
-}
-
-// Auto-enrich post-scan — Yahoo, silenzioso, batch da 3
-async function autoEnrichYahoo(tickers) {
-  const toEnrich = tickers
-    .map((t, i) => ({ t, i }))
-    .filter(({ t }) => !t.float || !t.rvol);
-
-  if (!toEnrich.length) return;
-
-  setScanStatus(`Enrich dati: 0/${toEnrich.length}...`);
-
-  const BATCH = 3;
-  let done = 0;
-  for (let b = 0; b < toEnrich.length; b += BATCH) {
-    const group = toEnrich.slice(b, b + BATCH);
-    await Promise.allSettled(group.map(({ i }) => enrichSingleYahoo(i)));
-    done += group.length;
-    setScanStatus(`Enrich dati: ${Math.min(done, toEnrich.length)}/${toEnrich.length}...`);
-    if (b + BATCH < toEnrich.length) await sleep(600);
-  }
-
-  setScanStatus(`✓ ${scanData.length} ticker — dati aggiornati`);
-  updateFloatBtn(); // aggiorna bottone FMP dopo enrich Yahoo
-}
-
-// Bottone FLOAT manuale — FMP fallback per ticker che Yahoo non riesce
 async function runFloatEnrich() {
   const fmpKey = getFmpKey();
   if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
@@ -1730,32 +1660,26 @@ async function runFloatEnrich() {
     btn.textContent = `⏳ ${i+1}/${indices.length}`;
 
     try {
-      // Prima prova Yahoo
-      const yahooOk = await enrichSingleYahoo(idx);
-      if (yahooOk) { updated++; incrementFmpCount(0); }
-      else {
-        // Fallback FMP shares-float
-        const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
-        const r = await fetchWithTimeout(url, 10000);
-        if (r.ok) {
-          const data = await r.json();
-          const item = Array.isArray(data) ? data[0] : data;
-          if (item && item.floatShares) {
-            scanData[idx].float = item.floatShares;
-            scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
-            const floatCell = document.getElementById(`float${idx}`);
-            if (floatCell) {
-              const isMicro = item.floatShares < 10e6;
-              floatCell.style.color      = isMicro ? 'var(--green)' : '';
-              floatCell.style.fontWeight = isMicro ? 'bold' : '';
-              floatCell.textContent      = fmtVol(item.floatShares);
-            }
-            updatePrelimRossCell(idx, scanData[idx]);
-            const cb = document.getElementById(`chk${idx}`);
-            if (cb) cb.parentElement.innerHTML = '';
-            updated++;
-            incrementFmpCount(1);
+      const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
+      const r = await fetchWithTimeout(url, 10000);
+      if (r.ok) {
+        const data = await r.json();
+        const item = Array.isArray(data) ? data[0] : data;
+        if (item && item.floatShares) {
+          scanData[idx].float = item.floatShares;
+          scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+          const floatCell = document.getElementById(`float${idx}`);
+          if (floatCell) {
+            const isMicro = item.floatShares < 10e6;
+            floatCell.style.color      = isMicro ? 'var(--green)' : '';
+            floatCell.style.fontWeight = isMicro ? 'bold' : '';
+            floatCell.textContent      = fmtVol(item.floatShares);
           }
+          updatePrelimRossCell(idx, scanData[idx]);
+          const cb = document.getElementById(`chk${idx}`);
+          if (cb) cb.parentElement.innerHTML = '';
+          updated++;
+          incrementFmpCount(1);
         }
       }
     } catch(e) { /* skip */ }
@@ -1770,7 +1694,7 @@ async function runFloatEnrich() {
   document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
-  showToast(`✓ Dati aggiornati per ${updated}/${indices.length} ticker`);
+  showToast(`✓ Float aggiornato per ${updated}/${indices.length} ticker`);
 }
 
 function showToast(msg) {
