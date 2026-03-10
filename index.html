@@ -1049,6 +1049,7 @@ function toggleFloat(el) {
   document.querySelectorAll('[data-fl]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
   activeFloat = parseInt(el.dataset.fl);
+  reapplyFilters();
 }
 function updateKeyStatus() {
   const ant = document.getElementById('apiKeyInput').value.trim();
@@ -1205,25 +1206,35 @@ function togglePrice(el) {
   document.querySelectorAll('[data-p]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
   activePrice = el.dataset.p;
+  reapplyFilters();
 }
 
 function toggleGap(el) {
   document.querySelectorAll('[data-g]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
   activeGap = parseInt(el.dataset.g);
+  reapplyFilters();
+}
+
+function reapplyFilters() {
+  if (!scanData.length) return;
+  const filtered = applyFilters(scanData);
+  renderTickers(filtered);
+  document.getElementById('tickerCount').textContent = filtered.length;
 }
 
 function toggleRoss(el) {
   document.querySelectorAll('[data-rs]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
   activeRoss = parseInt(el.dataset.rs);
-  applyFiltersAndRender();
+  reapplyFilters();
 }
 
 function toggleRvol(el) {
   document.querySelectorAll('[data-rv]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
   activeRvol = parseInt(el.dataset.rv);
+  reapplyFilters();
 }
 
 /* ══════════════════════════════════
