@@ -914,6 +914,7 @@ body {
       <div class="sh-source">Fonte: <span id="sourceLabel">--</span></div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
         <span id="selCount" style="font-size:9px;color:var(--muted3)"></span>
+        <button class="float-btn" id="rossSelBtn" onclick="runRossSelected()" style="display:none;border-color:var(--amber);color:var(--amber)">🎯 ROSS (<span id="rossSelBtnN">0</span>)</button>
         <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">⚡ FMP (<span id="floatBtnN">0</span>)</button>
       </div>
     </div>
@@ -1449,6 +1450,8 @@ function parseYahooQuotes(data) {
 }
 
 function applyFilters(tickers) {
+  // Segna l'indice originale in scanData su ogni ticker
+  tickers.forEach((t, i) => { t._scanIdx = i; });
   let filtered = [...tickers];
 
   // Filtro prezzo
@@ -1600,18 +1603,19 @@ function renderTickers(tickers, fromSort = false) {
       ? `<div style="font-size:7px;color:var(--amber);letter-spacing:.5px">PRE $${t.prePrice.toFixed(2)}</div>`
       : '';
 
-    const needsEnrich = !t.float;
-    return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${i})" style="animation-delay:${i*.04}s">
+    const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
+    const si = t._scanIdx ?? i; // indice reale in scanData
+    return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${si})" style="animation-delay:${i*.04}s">
       <div class="tr-check" onclick="event.stopPropagation()">
-        ${needsEnrich ? `<input type="checkbox" id="chk${i}" onchange="updateFloatBtn()">` : ''}
+        ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
       <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
-      <div class="tr-vol" id="vol${i}">${fmtVol(t.vol)}</div>
-      <div class="tr-float" id="float${i}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
-      <div class="tr-rvol ${rvolCls}" id="rvol${i}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
-      <div class="tr-ross" id="ross${i}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
+      <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
+      <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
+      <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
+      <div class="tr-ross" id="ross${si}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${i})">▶ ANALIZZA</button>
     </div>`;
@@ -1622,21 +1626,31 @@ function renderTickers(tickers, fromSort = false) {
    CHECKBOX + FLOAT ENRICH
 ══════════════════════════════════ */
 function getCheckedIndices() {
-  const indices = [];
-  scanData.forEach((_, i) => {
-    const cb = document.getElementById(`chk${i}`);
-    if (cb && cb.checked) indices.push(i);
-  });
-  return indices;
+  return [...document.querySelectorAll('[id^="chk"]:checked')]
+    .map(cb => parseInt(cb.dataset.scanidx ?? cb.id.replace('chk', '')));
 }
 
 function updateFloatBtn() {
-  const n = getCheckedIndices().length;
-  const btn = document.getElementById('floatBtn');
-  const cnt = document.getElementById('floatBtnN');
-  const sel = document.getElementById('selCount');
-  if (btn) btn.style.display = n > 0 ? 'inline-block' : 'none';
-  if (cnt) cnt.textContent = n;
+  const indices = getCheckedIndices();
+  const n = indices.length;
+
+  // Conta quanti selezionati non hanno float
+  const noFloat = indices.filter(i => scanData[i] && !scanData[i].float).length;
+
+  const floatBtn   = document.getElementById('floatBtn');
+  const floatBtnN  = document.getElementById('floatBtnN');
+  const rossSelBtn = document.getElementById('rossSelBtn');
+  const rossSelBtnN = document.getElementById('rossSelBtnN');
+  const sel        = document.getElementById('selCount');
+
+  // Bottone FMP — solo se almeno uno senza float
+  if (floatBtn) floatBtn.style.display = (n > 0 && noFloat > 0) ? 'inline-block' : 'none';
+  if (floatBtnN) floatBtnN.textContent = noFloat;
+
+  // Bottone ROSS — sempre se ci sono selezioni
+  if (rossSelBtn) rossSelBtn.style.display = n > 0 ? 'inline-block' : 'none';
+  if (rossSelBtnN) rossSelBtnN.textContent = n;
+
   if (sel) sel.textContent = n > 0 ? `${n} selezionati` : '';
 }
 
@@ -1912,6 +1926,55 @@ function sortTable(col) {
 let rossPage     = 0;
 let rossScanning = false;
 const ROSS_PAGE_SIZE = 2;
+
+// Scan Ross solo sui ticker selezionati con checkbox
+async function runRossSelected() {
+  const apiKey = getApiKey();
+  if (!apiKey) { alert('Inserisci la API Key Anthropic prima di procedere'); return; }
+
+  const indices = getCheckedIndices();
+  if (!indices.length) return;
+  if (rossScanning) return;
+
+  rossScanning = true;
+  const btn = document.getElementById('rossSelBtn');
+  btn.disabled = true;
+  document.getElementById('rossProgress').style.display = 'inline-block';
+
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    const t = scanData[idx];
+    if (!t) continue;
+
+    document.getElementById('rossProgress').textContent =
+      `🎯 Analisi ${i + 1}/${indices.length} — ${t.ticker}...`;
+
+    const rossCell = document.getElementById(`ross${idx}`);
+    if (rossCell) rossCell.innerHTML = '<span style="color:var(--muted2)">...</span>';
+
+    try {
+      const rep   = await callClaudeQuick(t, apiKey);
+      const score = rep.rossScore || 0;
+      const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
+      scanData[idx]._analysis = rep;
+      if (rossCell) rossCell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
+
+      const row = document.getElementById(`tr${i}`);
+      if (row && score >= 7) row.style.borderLeft = '2px solid var(--green)';
+    } catch(e) { console.warn('Ross error', t.ticker, e); }
+
+    if (i < indices.length - 1) await sleep(800);
+  }
+
+  rossScanning = false;
+  btn.disabled = false;
+  document.getElementById('rossProgress').textContent = `✓ ${indices.length} ticker analizzati`;
+
+  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
+  const ca = document.getElementById('checkAll');
+  if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
+  updateFloatBtn();
+}
 
 async function runRossScan() {
   const apiKey = getApiKey();
