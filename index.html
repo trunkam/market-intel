@@ -246,7 +246,7 @@ body {
 /* table header */
 .tbl-head {
   display: grid;
-  grid-template-columns: 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--s2);
@@ -271,7 +271,7 @@ body {
 
 .ticker-row {
   display: grid;
-  grid-template-columns: 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -297,7 +297,88 @@ body {
 .tr-ross  { font-size: 11px; font-weight: 700; text-align: right; }
 .tr-name  { font-size: 9px; color: var(--muted3); padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.th.sortable { cursor: pointer; user-select: none; transition: color .15s; }
+/* table header */
+.tbl-head {
+  display: grid;
+  grid-template-columns: 28px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--s2);
+  flex-shrink: 0;
+}
+.th {
+  font-size: 8px;
+  color: var(--muted2);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+.th.r { text-align: right; }
+
+/* ticker list */
+.ticker-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.ticker-list::-webkit-scrollbar { width: 3px; }
+.ticker-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.ticker-row {
+  display: grid;
+  grid-template-columns: 28px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .1s;
+  align-items: center;
+  animation: rowIn .3s ease both;
+}
+
+/* Checkbox stile Bloomberg */
+.tr-check {
+  display: flex; align-items: center; justify-content: center;
+}
+.tr-check input[type=checkbox] {
+  appearance: none;
+  width: 12px; height: 12px;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  transition: background .1s, border-color .1s;
+  flex-shrink: 0;
+}
+.tr-check input[type=checkbox]:checked {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.tr-check input[type=checkbox]:checked::after {
+  content: '✓';
+  display: block;
+  color: #000;
+  font-size: 8px;
+  text-align: center;
+  line-height: 12px;
+  font-weight: 700;
+}
+
+/* Bottone FLOAT nella header */
+.float-btn {
+  background: transparent;
+  border: 1px solid var(--green);
+  border-radius: 2px;
+  color: var(--green);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 1px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+  white-space: nowrap;
+  display: none;
+}
+.float-btn:hover  { background: rgba(0,212,138,.08); }
+.float-btn:disabled { opacity: .4; cursor: not-allowed; }
+.enrich-count { font-size: 9px; color: var(--muted2); }
 .th.sortable:hover { color: var(--amber); }
 .sort-ind { color: var(--amber); font-size: 9px; margin-left: 2px; }
 
@@ -824,8 +905,13 @@ body {
       <div class="sh-title">SCREENER SMALL CAP</div>
       <div class="sh-count">Trovati: <span id="tickerCount">0</span></div>
       <div class="sh-source">Fonte: <span id="sourceLabel">--</span></div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <span id="selCount" style="font-size:9px;color:var(--muted3)"></span>
+        <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">🔄 FLOAT (<span id="floatBtnN">0</span>)</button>
+      </div>
     </div>
     <div class="tbl-head">
+      <div class="th"><input type="checkbox" class="row-cb" id="checkAll" onclick="toggleCheckAll(this)" title="Seleziona tutti"></div>
       <div class="th sortable" onclick="sortTable('ticker')">TICKER <span class="sort-ind" id="sort-ticker"></span></div>
       <div class="th r sortable" onclick="sortTable('price')">PREZZO <span class="sort-ind" id="sort-price"></span></div>
       <div class="th r sortable" onclick="sortTable('chg')">CHG% <span class="sort-ind" id="sort-chg" style="color:var(--amber)">v</span></div>
@@ -1482,6 +1568,9 @@ function renderTickers(tickers, fromSort = false) {
       : '';
 
     return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${i})" style="animation-delay:${i*.04}s">
+      <div class="tr-check" onclick="event.stopPropagation()">
+        <input type="checkbox" id="chk${i}" onchange="updateFloatBtn()">
+      </div>
       <div class="tr-ticker">${t.ticker}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
       <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
@@ -1493,6 +1582,96 @@ function renderTickers(tickers, fromSort = false) {
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${i})">▶ ANALIZZA</button>
     </div>`;
   }).join('');
+}
+
+/* ══════════════════════════════════
+   CHECKBOX + FLOAT ENRICH
+══════════════════════════════════ */
+function getCheckedIndices() {
+  const indices = [];
+  scanData.forEach((_, i) => {
+    const cb = document.getElementById(`chk${i}`);
+    if (cb && cb.checked) indices.push(i);
+  });
+  return indices;
+}
+
+function updateFloatBtn() {
+  const n = getCheckedIndices().length;
+  const btn = document.getElementById('floatBtn');
+  const cnt = document.getElementById('floatBtnN');
+  const sel = document.getElementById('selCount');
+  if (btn) btn.style.display = n > 0 ? 'inline-block' : 'none';
+  if (cnt) cnt.textContent = n;
+  if (sel) sel.textContent = n > 0 ? `${n} selezionati` : '';
+}
+
+function toggleCheckAll(masterCb) {
+  const boxes = document.querySelectorAll('[id^="chk"]');
+  boxes.forEach(b => { b.checked = masterCb.checked; });
+  masterCb.style.background  = masterCb.checked ? 'var(--amber)' : 'transparent';
+  masterCb.style.borderColor = masterCb.checked ? 'var(--amber)' : 'var(--border2)';
+  updateFloatBtn();
+}
+
+async function runFloatEnrich() {
+  const fmpKey = getFmpKey();
+  if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
+
+  const indices = getCheckedIndices();
+  if (!indices.length) return;
+
+  const btn = document.getElementById('floatBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ aggiornamento...';
+
+  let updated = 0;
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    const t = scanData[idx];
+    if (!t) continue;
+
+    try {
+      const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
+      const r = await fetchWithTimeout(url, 10000);
+      if (r.ok) {
+        const data = await r.json();
+        // FMP shares-float restituisce array con un oggetto
+        const item = Array.isArray(data) ? data[0] : data;
+        if (item && item.floatShares) {
+          scanData[idx].float = item.floatShares;
+          scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+          // Aggiorna cella float nella tabella
+          const row = document.getElementById(`tr${idx}`);
+          if (row) {
+            const floatCell = row.querySelectorAll('div')[4]; // 0=check,1=ticker,2=price,3=chg,4=vol,5=float
+            const floatVal = item.floatShares;
+            const isMicro = floatVal < 10e6;
+            if (floatCell) {
+              floatCell.style.color = isMicro ? 'var(--green)' : '';
+              floatCell.style.fontWeight = isMicro ? 'bold' : '';
+              floatCell.textContent = fmtVol(floatVal);
+            }
+            // Aggiorna cella ross
+            updatePrelimRossCell(idx, scanData[idx]);
+          }
+          incrementFmpCount(1);
+          updated++;
+        }
+      }
+    } catch(e) { /* skip ticker con errore */ }
+
+    // Delay tra chiamate per non saturare FMP
+    if (i < indices.length - 1) await sleep(300);
+  }
+
+  btn.disabled = false;
+  btn.style.display = 'none';
+  document.getElementById('floatBtnN').textContent = '0';
+  document.getElementById('selCount').textContent = '';
+  // Deseleziona tutti
+  document.querySelectorAll('.row-cb').forEach(cb => cb.checked = false);
+  showToast(`✓ Float aggiornato per ${updated} ticker`);
 }
 
 function showToast(msg) {
