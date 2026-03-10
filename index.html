@@ -1567,9 +1567,10 @@ function renderTickers(tickers, fromSort = false) {
       ? `<div style="font-size:7px;color:var(--amber);letter-spacing:.5px">PRE $${t.prePrice.toFixed(2)}</div>`
       : '';
 
+    const needsEnrich = !t.float || !t.rvol || !t.vol;
     return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${i})" style="animation-delay:${i*.04}s">
       <div class="tr-check" onclick="event.stopPropagation()">
-        <input type="checkbox" id="chk${i}" onchange="updateFloatBtn()">
+        ${needsEnrich ? `<input type="checkbox" id="chk${i}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
