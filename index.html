@@ -1666,8 +1666,10 @@ function renderTickers(tickers, fromSort = false) {
 
     // Pre-market badge: mostra prezzo pre-mkt se diverso dal regular
     const isPreSession = t.marketState === 'PRE' && t.prePrice && t.hasPrePost;
+    const preChgStr = t.preChg ? `${t.preChg > 0 ? '+' : ''}${t.preChg.toFixed(1)}%` : '';
+    const preChgCol = t.preChg > 0 ? 'var(--green)' : t.preChg < 0 ? 'var(--red)' : 'var(--amber)';
     const priceBadge   = isPreSession
-      ? `<div style="font-size:7px;color:var(--amber);letter-spacing:.5px">PRE $${t.prePrice.toFixed(2)}</div>`
+      ? `<div style="font-size:7px;color:var(--amber);letter-spacing:.5px">PRE $${t.prePrice.toFixed(2)} <span style="color:${preChgCol}">${preChgStr}</span></div>`
       : '';
 
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
@@ -1684,7 +1686,7 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
       <div class="tr-ross" id="ross${si}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
-      <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${i})">▶ ANALIZZA</button>
+      <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${si})">▶ ANALIZZA</button>
     </div>`;
   }).join('');
 }
