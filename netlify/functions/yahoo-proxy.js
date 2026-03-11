@@ -22,7 +22,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing apikey' }) };
     }
 
-    const ALLOWED = ['gainers', 'shares-float'];
+    const ALLOWED = ['gainers', 'shares-float', 'profile'];
     if (!endpoint || !ALLOWED.includes(endpoint)) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: `Endpoint non supportato: ${endpoint}` }) };
     }
@@ -34,6 +34,9 @@ exports.handler = async (event) => {
       } else if (endpoint === 'shares-float') {
         if (!symbol) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbol' }) };
         url = `https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${apikey}`;
+      } else if (endpoint === 'profile') {
+        if (!symbol) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbol' }) };
+        url = `https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${apikey}`;
       }
 
       const response = await fetch(url, {
