@@ -2054,6 +2054,9 @@ function sortTable(col) {
     return sortAsc ? va - vb : vb - va;
   });
 
+  // Riassegna _scanIdx dopo il sort — indice = posizione in scanData
+  scanData.forEach((t, i) => { t._scanIdx = i; });
+
   renderTickers(scanData, true);
 
   // Dopo il re-render, ripristina i punteggi Ross già calcolati
