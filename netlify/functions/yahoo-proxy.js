@@ -95,17 +95,26 @@ exports.handler = async (event) => {
     const { symbols } = params;
     if (!symbols) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbols' }) };
 
+    const yHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${symbols}&fields=regularMarketVolume,averageDailyVolume3Month,averageDailyVolume10Day`;
-      const r = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) return { statusCode: r.status, headers, body: JSON.stringify({ error: `Yahoo quote error ${r.status}` }) };
+      // Prova v7 — più stabile di v8 per quote dirette
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+      const r = await fetch(url, { headers: yHeaders, signal: AbortSignal.timeout(10000) });
+      if (!r.ok) {
+        // Fallback: v6
+        const r2 = await fetch(
+          `https://query2.finance.yahoo.com/v6/finance/quote?symbols=${symbols}`,
+          { headers: yHeaders, signal: AbortSignal.timeout(10000) }
+        );
+        if (!r2.ok) return { statusCode: r2.status, headers, body: JSON.stringify({ error: `Yahoo quote error ${r2.status}` }) };
+        const d2 = await r2.json();
+        return { statusCode: 200, headers, body: JSON.stringify(d2) };
+      }
       const data = await r.json();
       return { statusCode: 200, headers, body: JSON.stringify(data) };
     } catch(e) {
