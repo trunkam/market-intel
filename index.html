@@ -903,6 +903,12 @@ body {
       <div class="sp-status" id="fmpStatus2">Opzionale — si attiva automaticamente quando la key principale è esaurita</div>
     </div>
     <hr class="sp-divider">
+    <div class="sp-field">
+      <div class="sp-label">Twelve Data API Key <span style="color:var(--muted3);font-size:9px">(vol + rvol per ticker FMP)</span></div>
+      <input class="sp-input" id="tdKeyInput" placeholder="la tua Twelve Data key..." />
+      <div class="sp-status" id="tdStatus">Opzionale — popola Volume e RVOL per i ticker FMP</div>
+    </div>
+    <hr class="sp-divider">
     <div class="sp-row">
       <button class="sp-btn-sec" onclick="closeSettings()">ANNULLA</button>
       <button class="sp-btn" onclick="saveSettings()">SALVA</button>
@@ -1041,12 +1047,14 @@ window.addEventListener('DOMContentLoaded', () => {
   const fmp = localStorage.getItem('mi_fmpkey');
   if (fmp) document.getElementById('fmpKeyInput').value = fmp;
   const fmp2 = localStorage.getItem('mi_fmpkey2');
+  const td   = localStorage.getItem('mi_tdkey');
   if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
   updateKeyStatus();
   updateFmpDisplay();
 });
 
 function openSettings() {
+  if (td)   document.getElementById('tdKeyInput').value = td;
   document.getElementById('settingsOverlay').classList.add('open');
 }
 function closeSettings() {
@@ -1063,6 +1071,9 @@ function saveSettings() {
   const fmp2 = document.getElementById('fmpKey2Input').value.trim();
   if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
   else localStorage.removeItem('mi_fmpkey2');
+  const td = document.getElementById('tdKeyInput')?.value?.trim();
+  if (td) localStorage.setItem('mi_tdkey', td);
+  else localStorage.removeItem('mi_tdkey');
   updateKeyStatus();
   closeSettings();
 }
@@ -1090,6 +1101,7 @@ function updateKeyStatus() {
   if (fs) { fs.textContent = fmp ? '✓ Key presente — screener micro-cap attivo' : 'Opzionale — aggiunge ticker FMP gainers'; fs.className = 'sp-status ' + (fmp ? 'ok' : ''); }
 }
 function getApiKey() { return localStorage.getItem('mi_apikey') || document.getElementById('apiKeyInput').value.trim(); }
+function getTdKey()  { return localStorage.getItem('mi_tdkey')  || document.getElementById('tdKeyInput')?.value?.trim() || ''; }
 
 /* ══════════════════════════════════
    COST TRACKING
@@ -1324,8 +1336,7 @@ async function runScan() {
     if (yahooTickers.length) parts.push(`Yahoo: ${yahooTickers.length}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
-    const filtered = applyFilters(merged);
-    merged.forEach((t, i) => { t._scanIdx = i; }); // indice fisso in masterData
+    merged.forEach((t, i) => { t._scanIdx = i; }); // assegna PRIMA di applyFilters
     merged.forEach(t => {
       t._prelimRoss = calcPrelimRoss(t);
       // Restore dati arricchiti dal sessionCache se presenti
@@ -1340,6 +1351,7 @@ async function runScan() {
       }
     });
     masterData = merged;
+    const filtered = applyFilters(merged);
     scanData = filtered;
     renderTickers(filtered);
   } catch(e) {
@@ -1467,6 +1479,32 @@ async function fetchFmpGainers() {
         };
       })
       .filter(t => t.price > 0 && t.chg > 3);
+
+    // Enrich vol+rvol via Twelve Data batch — 1 sola chiamata per tutti i ticker FMP
+    const tdKey = getTdKey();
+    if (tdKey && tickers.length > 0) {
+      try {
+        const symbols = tickers.map(t => t.ticker).join(',');
+        const tdUrl = `https://api.twelvedata.com/quote?symbol=${symbols}&apikey=${tdKey}`;
+        const tdR = await fetchWithTimeout(tdUrl, 10000);
+        if (tdR.ok) {
+          const tdData = await tdR.json();
+          // Twelve Data restituisce oggetto singolo se 1 simbolo, oggetto con chiavi se multipli
+          const quotes = tickers.length === 1
+            ? { [tickers[0].ticker]: tdData }
+            : tdData;
+          tickers.forEach(t => {
+            const q = quotes[t.ticker];
+            if (!q || q.status === 'error') return;
+            const vol    = parseInt(q.volume)         || null;
+            const avgVol = parseInt(q.average_volume) || null;
+            if (vol)    t.vol    = vol;
+            if (avgVol) t.avgVol = avgVol;
+            if (vol && avgVol && avgVol > 0) t.rvol = vol / avgVol;
+          });
+        }
+      } catch(e) { /* silenzioso — vol/rvol resteranno null */ }
+    }
 
     return tickers;
   } catch(e) {
@@ -1748,6 +1786,7 @@ function toggleCheckAll(masterCb) {
 ══════════════════════════════════ */
 async function runFloatEnrich() {
   const fmpKey = getFmpKey();
+
   if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
 
   const indices = getCheckedIndices();
@@ -1772,28 +1811,23 @@ async function runFloatEnrich() {
         const data = await r.json();
         const item = Array.isArray(data) ? data[0] : data;
         if (item) {
-          console.log('FMP profile raw:', JSON.stringify(item, null, 2)); // DEBUG — rimuovere dopo verifica
           const float  = item.floatShares || null;
-          const vol    = item.volAvg || item.volume || null;         // profile usa volAvg per avg volume
-          const avgVol = item.volAvg || null;
-          const curVol = item.volume || null;
-          const rvol   = (curVol && avgVol && avgVol > 0) ? (curVol / avgVol) : null;
+          const vol    = item.volume       || null;
+          const avgVol = item.averageVolume || null;
+          const rvol   = (vol && avgVol && avgVol > 0) ? (vol / avgVol) : null;
 
-          if (float)  { scanData[idx].float  = float; }
-          if (curVol) { scanData[idx].vol     = curVol; }
-          if (avgVol) { scanData[idx].avgVol  = avgVol; }
-          if (rvol)   { scanData[idx].rvol    = rvol; }
-
+          if (float)  scanData[idx].float  = float;
+          if (vol)    scanData[idx].vol     = vol;
+          if (avgVol) scanData[idx].avgVol  = avgVol;
+          if (rvol)   scanData[idx].rvol    = rvol;
           scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
 
-          // Aggiorna sessionCache
           if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
           if (float)  sessionCache[t.ticker].float  = float;
-          if (curVol) sessionCache[t.ticker].vol     = curVol;
+          if (vol)    sessionCache[t.ticker].vol     = vol;
           if (avgVol) sessionCache[t.ticker].avgVol  = avgVol;
           if (rvol)   sessionCache[t.ticker].rvol    = rvol;
 
-          // Aggiorna celle tabella
           if (float) {
             const floatCell = document.getElementById(`float${idx}`);
             if (floatCell) {
@@ -1803,9 +1837,9 @@ async function runFloatEnrich() {
               floatCell.textContent      = fmtVol(float);
             }
           }
-          if (curVol) {
+          if (vol) {
             const volCell = document.getElementById(`vol${idx}`);
-            if (volCell) volCell.textContent = fmtVol(curVol);
+            if (volCell) volCell.textContent = fmtVol(vol);
           }
           if (rvol) {
             const rvolCell = document.getElementById(`rvol${idx}`);
@@ -1814,10 +1848,8 @@ async function runFloatEnrich() {
               rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
             }
           }
-
           updatePrelimRossCell(idx, scanData[idx]);
-          updated++;
-          incrementFmpCount(1);
+          if (float || vol) { updated++; incrementFmpCount(1); }
         }
       }
     } catch(e) { /* skip */ }
