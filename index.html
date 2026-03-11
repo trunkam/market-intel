@@ -813,6 +813,7 @@ body {
   </div>
   <div class="vsep"></div>
   <button class="scan-btn" id="scanBtn" onclick="runScan()">▶ SCAN ORA</button>
+  <button class="scan-btn" onclick="clearSessionCache()" title="Svuota storico sessione (float + analisi)" style="background:transparent;border:1px solid var(--border2);color:var(--muted3);font-size:9px;padding:4px 8px">🗑 RESET CACHE</button>
   <button class="scan-btn" id="rossBtn" onclick="runRossScan()" style="display:none;background:transparent;border:1px solid var(--amber);color:var(--amber)">🎯 SCAN ROSS</button>
   <div id="rossProgress" style="display:none;font-size:9px;color:var(--muted3);white-space:nowrap"></div>
   <div class="vsep"></div>
@@ -1024,6 +1025,14 @@ let activeFloat    = 0;
 let activeRoss     = 0; // default TUTTI — non filtra per score Ross
 let currentTicker  = null;
 let scanData       = [];
+let sessionCache   = {}; // { TICKER: { float, _analysis, _prelimRoss, vol, avgVol, rvol } } — persiste tra scan
+
+function clearSessionCache() {
+  if (!Object.keys(sessionCache).length) return;
+  const n = Object.keys(sessionCache).length;
+  if (!confirm(`Svuota cache sessione?\n${n} ticker con dati arricchiti verranno persi.`)) return;
+  sessionCache = {};
+}
 
 window.addEventListener('DOMContentLoaded', () => {
   const ant = localStorage.getItem('mi_apikey');
@@ -1314,7 +1323,20 @@ async function runScan() {
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     const filtered = applyFilters(merged);
-    filtered.forEach(t => { t._prelimRoss = calcPrelimRoss(t); });
+    filtered.forEach(t => {
+      t._prelimRoss = calcPrelimRoss(t);
+      // Restore dati arricchiti dal sessionCache se presenti
+      const cached = sessionCache[t.ticker];
+      if (cached) {
+        if (cached.float)     t.float     = cached.float;
+        if (cached.vol)       t.vol       = cached.vol;
+        if (cached.avgVol)    t.avgVol    = cached.avgVol;
+        if (cached.rvol)      t.rvol      = cached.rvol;
+        if (cached._analysis) t._analysis = cached._analysis;
+        // Ricalcola prelim con dati aggiornati
+        t._prelimRoss = calcPrelimRoss(t);
+      }
+    });
     scanData = filtered;
     renderTickers(filtered);
   } catch(e) {
@@ -1684,7 +1706,18 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
       <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
       <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
-      <div class="tr-ross" id="ross${si}">${t._prelimRoss ? `<span style="color:var(--muted2);font-size:12px" title="Stima preliminare (4 pillar Yahoo)">${t._prelimRoss}</span>` : '--'}</div>
+      <div class="tr-ross" id="ross${si}">${(() => {
+        if (t._analysis?.rossScore) {
+          const s = t._analysis.rossScore;
+          const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
+          return `<span style="color:${col};font-size:13px">${s}</span>`;
+        }
+        if (t._prelimRoss) {
+          const col = t._prelimRoss >= 8 ? 'var(--amber)' : t._prelimRoss >= 6 ? 'var(--muted2)' : 'var(--muted3)';
+          return `<span style="color:${col};font-size:12px" title="Stima preliminare">${t._prelimRoss}</span>`;
+        }
+        return '--';
+      })()}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${si})">▶ ANALIZZA</button>
     </div>`;
@@ -1762,6 +1795,9 @@ async function runFloatEnrich() {
         if (item && item.floatShares) {
           scanData[idx].float = item.floatShares;
           scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+          // Salva nel sessionCache
+          if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
+          sessionCache[t.ticker].float = item.floatShares;
           const floatCell = document.getElementById(`float${idx}`);
           if (floatCell) {
             const isMicro = item.floatShares < 10e6;
@@ -2024,6 +2060,9 @@ async function runRossSelected() {
       const score = rep.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       scanData[idx]._analysis = rep;
+      // Salva nel sessionCache
+      if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
+      sessionCache[t.ticker]._analysis = rep;
       if (rossCell) rossCell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
 
       const row = document.getElementById(`tr${i}`);
@@ -2309,6 +2348,21 @@ Rispondi SOLO con JSON:
 ══════════════════════════════════ */
 function renderAnalysis(rep, elapsed) {
   document.getElementById('ahTicker').textContent = rep.ticker || currentTicker || '';
+
+  // Aggiorna cella ross nella tabella
+  const idx = scanData.findIndex(t => t.ticker === (rep.ticker || currentTicker));
+  if (idx >= 0) {
+    scanData[idx]._analysis = rep;
+    // Salva nel sessionCache
+    if (!sessionCache[rep.ticker || currentTicker]) sessionCache[rep.ticker || currentTicker] = {};
+    sessionCache[rep.ticker || currentTicker]._analysis = rep;
+    const rossCell = document.getElementById(`ross${idx}`);
+    if (rossCell && rep.rossScore) {
+      const s = rep.rossScore;
+      const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
+      rossCell.innerHTML = `<span style="color:${col};font-size:13px" title="Analisi completa">${s}</span>`;
+    }
+  }
 
   // Timing chip
   const tm    = rep.timing || 'INTRADAY';
