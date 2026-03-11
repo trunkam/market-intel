@@ -53,7 +53,7 @@ exports.handler = async (event) => {
     }
   }
 
-  // ── MODALITÀ YAHOO QUOTESUMMARY (float + vol + rvol) ──────────
+  // ── MODALITÀ YAHOO QUOTE (float + vol + rvol, no crumb) ───────
   if (params.mode === 'quotesummary') {
     const { symbol } = params;
     if (!symbol) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbol' }) };
@@ -65,47 +65,49 @@ exports.handler = async (event) => {
     };
 
     try {
-      // Ottieni crumb prima
-      const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/csrfToken', {
-        headers: yHeaders,
-        signal: AbortSignal.timeout(5000),
-      });
-      const setCookie = crumbRes.headers.get('set-cookie') || '';
-      const cookieMatch = setCookie.match(/A1=([^;]+)/);
-      const cookie = cookieMatch ? `A1=${cookieMatch[1]}` : '';
-
-      let crumb = '';
-      try {
-        const crumbText = await crumbRes.text();
-        crumb = crumbText.trim();
-      } catch(e) {}
-
-      // Fallback: prova senza crumb (a volte funziona)
-      const urlBase = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=defaultKeyStatistics,summaryDetail`;
-      const urlWithCrumb = crumb ? `${urlBase}&crumb=${encodeURIComponent(crumb)}` : urlBase;
-
-      const reqHeaders = { ...yHeaders };
-      if (cookie) reqHeaders['Cookie'] = cookie;
-
-      const r = await fetch(urlWithCrumb, {
-        headers: reqHeaders,
-        signal: AbortSignal.timeout(10000),
-      });
-
-      if (!r.ok) {
-        // Prova query1 senza crumb come ultimo tentativo
-        const r2 = await fetch(
-          `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=defaultKeyStatistics,summaryDetail`,
-          { headers: yHeaders, signal: AbortSignal.timeout(8000) }
-        );
-        if (!r2.ok) return { statusCode: r2.status, headers, body: JSON.stringify({ error: `Yahoo QS error ${r2.status}` }) };
-        const data2 = await r2.json();
-        return { statusCode: 200, headers, body: JSON.stringify(data2) };
-      }
+      const url = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${symbol}&fields=floatShares,regularMarketVolume,averageDailyVolume3Month,averageDailyVolume10Day`;
+      const r = await fetch(url, { headers: yHeaders, signal: AbortSignal.timeout(10000) });
+      if (!r.ok) return { statusCode: r.status, headers, body: JSON.stringify({ error: `Yahoo quote error ${r.status}` }) };
 
       const data = await r.json();
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
+      const quote = data?.quoteResponse?.result?.[0];
+      if (!quote) return { statusCode: 200, headers, body: JSON.stringify({ quoteSummary: { result: null } }) };
 
+      const normalized = {
+        quoteSummary: {
+          result: [{
+            defaultKeyStatistics: { floatShares: { raw: quote.floatShares || null } },
+            summaryDetail: {
+              volume: { raw: quote.regularMarketVolume || null },
+              averageVolume: { raw: quote.averageDailyVolume3Month || quote.averageDailyVolume10Day || null }
+            }
+          }]
+        }
+      };
+      return { statusCode: 200, headers, body: JSON.stringify(normalized) };
+    } catch(e) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    }
+  }
+
+  // ── MODALITÀ YAHOO QUOTE BATCH (vol + rvol per simboli multipli) ──
+  if (params.mode === 'quote') {
+    const { symbols } = params;
+    if (!symbols) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing symbols' }) };
+
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${symbols}&fields=regularMarketVolume,averageDailyVolume3Month,averageDailyVolume10Day`;
+      const r = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) return { statusCode: r.status, headers, body: JSON.stringify({ error: `Yahoo quote error ${r.status}` }) };
+      const data = await r.json();
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     } catch(e) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
     }
