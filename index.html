@@ -1386,7 +1386,7 @@ async function fetchFmpGainers() {
 
     incrementFmpCount(1); // 1 chiamata API
 
-    return data
+    const tickers = data
       .filter(q => q.symbol && q.price > 0)
       .map(q => {
         const price = q.price || 0;
@@ -1397,9 +1397,9 @@ async function fetchFmpGainers() {
           price:       price,
           chg:         chg,
           vol:         q.volume || null,
-          avgVol:      q.avgVolume || null,
-          float:       null, // FMP gainers non ha float — verrà da shares-float se enrich
-          rvol:        (q.volume && q.avgVolume && q.avgVolume > 0) ? (q.volume / q.avgVolume) : null,
+          avgVol:      q.avgVolume || q.averageVolume || null,
+          float:       q.floatShares || null,
+          rvol:        (q.volume && (q.avgVolume || q.averageVolume)) ? (q.volume / (q.avgVolume || q.averageVolume)) : null,
           mktCap:      q.marketCap || null,
           prePrice:    null,
           preChg:      null,
@@ -1409,7 +1409,31 @@ async function fetchFmpGainers() {
           source:      'FMP',
         };
       })
-      .filter(t => t.price > 0 && t.chg > 3); // almeno +3% per rilevanza
+      .filter(t => t.price > 0 && t.chg > 3);
+
+    // Enrich vol+rvol via Yahoo quote batch — 1 sola chiamata per tutti i ticker FMP
+    try {
+      const symbols = tickers.map(t => t.ticker).join(',');
+      const qurl = `${NETLIFY_PROXY}?mode=quote&symbols=${symbols}`;
+      const qr = await fetchWithTimeout(qurl, 10000);
+      if (qr.ok) {
+        const qdata = await qr.json();
+        const quotes = qdata?.quoteResponse?.result || [];
+        const map = {};
+        quotes.forEach(q => { map[q.symbol] = q; });
+        tickers.forEach(t => {
+          const q = map[t.ticker];
+          if (!q) return;
+          const vol    = q.regularMarketVolume || null;
+          const avgVol = q.averageDailyVolume3Month || q.averageDailyVolume10Day || null;
+          if (vol)    t.vol    = vol;
+          if (avgVol) t.avgVol = avgVol;
+          if (vol && avgVol && avgVol > 0) t.rvol = vol / avgVol;
+        });
+      }
+    } catch(e) { /* silenzioso — vol/rvol resteranno null */ }
+
+    return tickers; // almeno +3% per rilevanza
   } catch(e) {
     return []; // fallimento silenzioso — Yahoo rimane fonte principale
   }
