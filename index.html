@@ -1468,29 +1468,7 @@ async function fetchFmpGainers() {
       })
       .filter(t => t.price > 0 && t.chg > 3);
 
-    // Enrich vol+rvol via Yahoo quote batch — 1 sola chiamata per tutti i ticker FMP
-    try {
-      const symbols = tickers.map(t => t.ticker).join(',');
-      const qurl = `${NETLIFY_PROXY}?mode=quote&symbols=${symbols}`;
-      const qr = await fetchWithTimeout(qurl, 10000);
-      if (qr.ok) {
-        const qdata = await qr.json();
-        const quotes = qdata?.quoteResponse?.result || [];
-        const map = {};
-        quotes.forEach(q => { map[q.symbol] = q; });
-        tickers.forEach(t => {
-          const q = map[t.ticker];
-          if (!q) return;
-          const vol    = q.regularMarketVolume || null;
-          const avgVol = q.averageDailyVolume3Month || q.averageDailyVolume10Day || null;
-          if (vol)    t.vol    = vol;
-          if (avgVol) t.avgVol = avgVol;
-          if (vol && avgVol && avgVol > 0) t.rvol = vol / avgVol;
-        });
-      }
-    } catch(e) { /* silenzioso — vol/rvol resteranno null */ }
-
-    return tickers; // almeno +3% per rilevanza
+    return tickers;
   } catch(e) {
     return []; // fallimento silenzioso — Yahoo rimane fonte principale
   }
@@ -1746,9 +1724,9 @@ function updateFloatBtn() {
   const rossSelBtnN = document.getElementById('rossSelBtnN');
   const sel        = document.getElementById('selCount');
 
-  // Bottone FMP — solo se almeno uno senza float
-  if (floatBtn) floatBtn.style.display = (n > 0 && noFloat > 0) ? 'inline-block' : 'none';
-  if (floatBtnN) floatBtnN.textContent = noFloat;
+  // Bottone FMP — visibile sempre se ci sono selezioni
+  if (floatBtn) floatBtn.style.display = n > 0 ? 'inline-block' : 'none';
+  if (floatBtnN) floatBtnN.textContent = n;
 
   // Bottone ROSS — sempre se ci sono selezioni
   if (rossSelBtn) rossSelBtn.style.display = n > 0 ? 'inline-block' : 'none';
@@ -1818,7 +1796,7 @@ async function runFloatEnrich() {
 
   btn.disabled = false;
   btn.style.display = 'none';
-  document.getElementById('floatBtnN').textContent = '0';
+  const fbn = document.getElementById('floatBtnN'); if (fbn) fbn.textContent = '0';
   if (document.getElementById('selCount')) document.getElementById('selCount').textContent = '';
   document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
