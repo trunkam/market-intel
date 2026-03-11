@@ -822,7 +822,7 @@ body {
   </div>
   <div class="vsep"></div>
   <div id="fmpBox" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;cursor:pointer" onclick="resetFmpCount()" title="Chiamate FMP oggi — clicca per azzerare">
-    <div style="font-size:8px;color:var(--muted2);letter-spacing:1px">FMP OGGI</div>
+    <div style="font-size:8px;color:var(--muted2);letter-spacing:1px">FMP <span id="fmpKeyLabel" style="color:var(--muted3)">KEY1</span></div>
     <div id="fmpVal" style="font-family:'Bebas Neue',sans-serif;font-size:14px;color:var(--muted3)">0</div>
   </div>
 </div>
@@ -894,6 +894,12 @@ body {
       <div class="sp-label">FMP API Key <span style="color:var(--muted3);font-size:9px">(screener micro-cap)</span></div>
       <input class="sp-input" id="fmpKeyInput" placeholder="la tua FMP key..." />
       <div class="sp-status" id="fmpStatus">Aggiunge ticker micro-float da FMP gainers</div>
+    </div>
+    <hr class="sp-divider">
+    <div class="sp-field">
+      <div class="sp-label">FMP API Key 2 <span style="color:var(--muted3);font-size:9px">(backup — usata automaticamente dopo 249 chiamate)</span></div>
+      <input class="sp-input" id="fmpKey2Input" placeholder="la tua FMP key di backup..." />
+      <div class="sp-status" id="fmpStatus2">Opzionale — si attiva automaticamente quando la key principale è esaurita</div>
     </div>
     <hr class="sp-divider">
     <div class="sp-row">
@@ -1024,6 +1030,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (ant) document.getElementById('apiKeyInput').value = ant;
   const fmp = localStorage.getItem('mi_fmpkey');
   if (fmp) document.getElementById('fmpKeyInput').value = fmp;
+  const fmp2 = localStorage.getItem('mi_fmpkey2');
+  if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
   updateKeyStatus();
   updateFmpDisplay();
 });
@@ -1042,10 +1050,21 @@ function saveSettings() {
   if (ant) localStorage.setItem('mi_apikey', ant);
   const fmp = document.getElementById('fmpKeyInput').value.trim();
   if (fmp) localStorage.setItem('mi_fmpkey', fmp);
+  const fmp2 = document.getElementById('fmpKey2Input').value.trim();
+  if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
+  else localStorage.removeItem('mi_fmpkey2');
   updateKeyStatus();
   closeSettings();
 }
-function getFmpKey() { return localStorage.getItem('mi_fmpkey') || document.getElementById('fmpKeyInput')?.value?.trim() || ''; }
+
+// Restituisce la key FMP attiva — usa key2 automaticamente se fmpCount >= 200
+function getFmpKey() {
+  const count = parseInt(localStorage.getItem('mi_fmpcount') || '0', 10);
+  const key2  = localStorage.getItem('mi_fmpkey2') || document.getElementById('fmpKey2Input')?.value?.trim() || '';
+  const key1  = localStorage.getItem('mi_fmpkey')  || document.getElementById('fmpKeyInput')?.value?.trim()  || '';
+  if (count >= 249 && key2) return key2;
+  return key1;
+}
 function toggleFloat(el) {
   document.querySelectorAll('[data-fl]').forEach(e => e.classList.remove('on'));
   el.classList.add('on');
@@ -1120,6 +1139,19 @@ function updateFmpDisplay() {
   el.textContent = count;
   const col = count > 200 ? 'var(--red)' : count > 100 ? 'var(--warn)' : count > 0 ? 'var(--amber)' : 'var(--muted3)';
   el.style.color = col;
+
+  // Mostra quale key è attiva
+  const key2 = localStorage.getItem('mi_fmpkey2') || '';
+  const keyLabelEl = document.getElementById('fmpKeyLabel');
+  if (keyLabelEl) {
+    if (count >= 249 && key2) {
+      keyLabelEl.textContent = 'KEY2';
+      keyLabelEl.style.color = 'var(--warn)';
+    } else {
+      keyLabelEl.textContent = 'KEY1';
+      keyLabelEl.style.color = 'var(--muted3)';
+    }
+  }
 }
 function resetFmpCount() {
   const d = getFmpCountData();
@@ -1725,8 +1757,6 @@ async function runFloatEnrich() {
             floatCell.textContent      = fmtVol(item.floatShares);
           }
           updatePrelimRossCell(idx, scanData[idx]);
-          const cb = document.getElementById(`chk${idx}`);
-          if (cb) cb.parentElement.innerHTML = '';
           updated++;
           incrementFmpCount(1);
         }
