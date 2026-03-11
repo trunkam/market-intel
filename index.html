@@ -1766,24 +1766,55 @@ async function runFloatEnrich() {
     btn.textContent = `⏳ ${i+1}/${indices.length}`;
 
     try {
-      const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`;
+      const url = `${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`;
       const r = await fetchWithTimeout(url, 10000);
       if (r.ok) {
         const data = await r.json();
         const item = Array.isArray(data) ? data[0] : data;
-        if (item && item.floatShares) {
-          scanData[idx].float = item.floatShares;
+        if (item) {
+          console.log('FMP profile raw:', JSON.stringify(item, null, 2)); // DEBUG — rimuovere dopo verifica
+          const float  = item.floatShares || null;
+          const vol    = item.volAvg || item.volume || null;         // profile usa volAvg per avg volume
+          const avgVol = item.volAvg || null;
+          const curVol = item.volume || null;
+          const rvol   = (curVol && avgVol && avgVol > 0) ? (curVol / avgVol) : null;
+
+          if (float)  { scanData[idx].float  = float; }
+          if (curVol) { scanData[idx].vol     = curVol; }
+          if (avgVol) { scanData[idx].avgVol  = avgVol; }
+          if (rvol)   { scanData[idx].rvol    = rvol; }
+
           scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
-          // Salva nel sessionCache
+
+          // Aggiorna sessionCache
           if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
-          sessionCache[t.ticker].float = item.floatShares;
-          const floatCell = document.getElementById(`float${idx}`);
-          if (floatCell) {
-            const isMicro = item.floatShares < 10e6;
-            floatCell.style.color      = isMicro ? 'var(--green)' : '';
-            floatCell.style.fontWeight = isMicro ? 'bold' : '';
-            floatCell.textContent      = fmtVol(item.floatShares);
+          if (float)  sessionCache[t.ticker].float  = float;
+          if (curVol) sessionCache[t.ticker].vol     = curVol;
+          if (avgVol) sessionCache[t.ticker].avgVol  = avgVol;
+          if (rvol)   sessionCache[t.ticker].rvol    = rvol;
+
+          // Aggiorna celle tabella
+          if (float) {
+            const floatCell = document.getElementById(`float${idx}`);
+            if (floatCell) {
+              const isMicro = float < 10e6;
+              floatCell.style.color      = isMicro ? 'var(--green)' : '';
+              floatCell.style.fontWeight = isMicro ? 'bold' : '';
+              floatCell.textContent      = fmtVol(float);
+            }
           }
+          if (curVol) {
+            const volCell = document.getElementById(`vol${idx}`);
+            if (volCell) volCell.textContent = fmtVol(curVol);
+          }
+          if (rvol) {
+            const rvolCell = document.getElementById(`rvol${idx}`);
+            if (rvolCell) {
+              rvolCell.textContent = rvol.toFixed(1) + 'x';
+              rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
+            }
+          }
+
           updatePrelimRossCell(idx, scanData[idx]);
           updated++;
           incrementFmpCount(1);
