@@ -1696,7 +1696,7 @@ function renderTickers(tickers, fromSort = false) {
 
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
     const si = t._scanIdx ?? i; // indice reale in scanData
-    return `<div class="ticker-row" id="tr${i}" onclick="selectTicker(${si})" style="animation-delay:${i*.04}s">
+    return `<div class="ticker-row" id="tr${i}" data-scanidx="${si}" onclick="selectTicker(${si})" style="animation-delay:${i*.04}s">
       <div class="tr-check" onclick="event.stopPropagation()">
         ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" onchange="updateFloatBtn()">` : ''}
       </div>
@@ -1835,7 +1835,9 @@ function showToast(msg) {
 
 function selectTicker(i) {
   document.querySelectorAll('.ticker-row').forEach(r => r.classList.remove('active'));
-  const el = document.getElementById(`tr${i}`);
+  // Cerca la riga per data-scanidx invece di id tr${i}
+  const el = document.querySelector(`[data-scanidx="${i}"]`)?.closest('.ticker-row') 
+          || document.getElementById(`tr${i}`);
   if (el) el.classList.add('active');
 
   const t = scanData[i];
