@@ -1528,7 +1528,7 @@ function parseYahooQuotes(data) {
 }
 
 function applyFilters(tickers) {
-  // Segna l'indice originale in scanData su ogni ticker
+  // Segna l'indice originale in scanData — PRIMA del filtro, non del sort
   tickers.forEach((t, i) => { t._scanIdx = i; });
   let filtered = [...tickers];
 
@@ -2005,6 +2005,9 @@ function sortTable(col) {
     if (col === 'ross')   { va = a._analysis?.rossScore || a._prelimRoss || 0; vb = b._analysis?.rossScore || b._prelimRoss || 0; }
     return sortAsc ? va - vb : vb - va;
   });
+
+  // Riassegna _scanIdx in base alla nuova posizione in scanData dopo il sort
+  scanData.forEach((t, i) => { t._scanIdx = i; });
 
   renderTickers(scanData, true);
 
