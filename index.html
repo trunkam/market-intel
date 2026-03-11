@@ -1024,7 +1024,8 @@ let activeRvol     = 0;
 let activeFloat    = 0;
 let activeRoss     = 0; // default TUTTI — non filtra per score Ross
 let currentTicker  = null;
-let scanData       = [];
+let scanData       = []; // vista filtrata/sortata per il render
+let masterData     = []; // tutti i ticker con indici fissi — fonte di verità
 let sessionCache   = {}; // { TICKER: { float, _analysis, _prelimRoss, vol, avgVol, rvol } } — persiste tra scan
 
 function clearSessionCache() {
@@ -1259,8 +1260,9 @@ function toggleGap(el) {
 }
 
 function reapplyFilters() {
-  if (!scanData.length) return;
-  const filtered = applyFilters(scanData);
+  if (!masterData.length) return;
+  const filtered = applyFilters(masterData);
+  scanData = filtered;
   renderTickers(filtered);
   document.getElementById('tickerCount').textContent = filtered.length;
 }
@@ -1323,7 +1325,8 @@ async function runScan() {
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     const filtered = applyFilters(merged);
-    filtered.forEach(t => {
+    merged.forEach((t, i) => { t._scanIdx = i; }); // indice fisso in masterData
+    merged.forEach(t => {
       t._prelimRoss = calcPrelimRoss(t);
       // Restore dati arricchiti dal sessionCache se presenti
       const cached = sessionCache[t.ticker];
@@ -1333,10 +1336,10 @@ async function runScan() {
         if (cached.avgVol)    t.avgVol    = cached.avgVol;
         if (cached.rvol)      t.rvol      = cached.rvol;
         if (cached._analysis) t._analysis = cached._analysis;
-        // Ricalcola prelim con dati aggiornati
         t._prelimRoss = calcPrelimRoss(t);
       }
     });
+    masterData = merged;
     scanData = filtered;
     renderTickers(filtered);
   } catch(e) {
@@ -1528,8 +1531,6 @@ function parseYahooQuotes(data) {
 }
 
 function applyFilters(tickers) {
-  // Segna l'indice originale in scanData — PRIMA del filtro, non del sort
-  tickers.forEach((t, i) => { t._scanIdx = i; });
   let filtered = [...tickers];
 
   // Filtro prezzo
@@ -1696,7 +1697,7 @@ function renderTickers(tickers, fromSort = false) {
 
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
     const si = t._scanIdx ?? i; // indice reale in scanData
-    return `<div class="ticker-row" id="tr${i}" data-scanidx="${si}" data-rowscanidx="${si}" onclick="selectTicker(${si})" style="animation-delay:${i*.04}s">
+    return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s">
       <div class="tr-check" onclick="event.stopPropagation()">
         ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" onchange="updateFloatBtn()">` : ''}
       </div>
@@ -1719,7 +1720,7 @@ function renderTickers(tickers, fromSort = false) {
         return '--';
       })()}</div>
       <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
-      <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerIdx(${si})">▶ ANALIZZA</button>
+      <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerBySymbol('${t.ticker}')">▶ ANALIZZA</button>
     </div>`;
   }).join('');
 }
@@ -1833,13 +1834,18 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+function selectTickerBySymbol(symbol) {
+  const idx = scanData.findIndex(t => t.ticker === symbol);
+  if (idx < 0) return;
+  selectTicker(idx);
+}
+
 function selectTicker(i) {
   document.querySelectorAll('.ticker-row').forEach(r => r.classList.remove('active'));
-  const el = document.querySelector(`[data-rowscanidx="${i}"]`) || document.getElementById(`tr${i}`);
-  if (el) el.classList.add('active');
-
   const t = scanData[i];
   if (!t) return;
+  const el = document.querySelector(`[data-ticker="${t.ticker}"]`);
+  if (el) el.classList.add('active');
 
   // Copia ticker negli appunti
   navigator.clipboard.writeText(t.ticker).then(() => {
@@ -2005,9 +2011,6 @@ function sortTable(col) {
     if (col === 'ross')   { va = a._analysis?.rossScore || a._prelimRoss || 0; vb = b._analysis?.rossScore || b._prelimRoss || 0; }
     return sortAsc ? va - vb : vb - va;
   });
-
-  // Riassegna _scanIdx in base alla nuova posizione in scanData dopo il sort
-  scanData.forEach((t, i) => { t._scanIdx = i; });
 
   renderTickers(scanData, true);
 
@@ -2217,6 +2220,11 @@ Rispondi SOLO con JSON:
 /* ══════════════════════════════════
    ANALYZE (singolo, dettagliato)
 ══════════════════════════════════ */
+async function analyzeTickerBySymbol(symbol) {
+  const idx = scanData.findIndex(t => t.ticker === symbol);
+  if (idx >= 0) analyzeTickerIdx(idx);
+}
+
 async function analyzeTickerIdx(idx) {
   const t = scanData[idx];
   if (!t) return;
