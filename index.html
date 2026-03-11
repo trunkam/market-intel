@@ -1628,6 +1628,17 @@ function calcPrelimRoss(t) {
   return divisor > 0 ? Math.round(score / divisor) : 0;
 }
 
+function updatePrelimRossCell(idx, t) {
+  const cell = document.getElementById(`ross${idx}`);
+  if (!cell) return;
+  // Non sovrascrivere se c'è già un'analisi Ross reale
+  if (t._analysis?.rossScore) return;
+  const score = t._prelimRoss || 0;
+  if (!score) return;
+  const col = score >= 8 ? 'var(--amber)' : score >= 6 ? 'var(--muted2)' : 'var(--muted3)';
+  cell.innerHTML = `<span style="color:${col};font-size:12px" title="Stima preliminare (pillar disponibili)">${score}</span>`;
+}
+
 
 function renderTickers(tickers, fromSort = false) {
   if (!tickers.length) {
