@@ -1746,7 +1746,8 @@ function renderTickers(tickers, fromSort = false) {
 ══════════════════════════════════ */
 function getCheckedIndices() {
   return [...document.querySelectorAll('[id^="chk"]:checked')]
-    .map(cb => parseInt(cb.dataset.scanidx ?? cb.id.replace('chk', '')));
+    .map(cb => parseInt(cb.dataset.scanidx ?? cb.id.replace('chk', '')))
+    .filter(i => !isNaN(i) && i >= 0);
 }
 
 function updateFloatBtn() {
@@ -1790,7 +1791,7 @@ async function runFloatEnrich() {
   if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
 
   const indices = getCheckedIndices();
-  if (!indices.length) return;
+  if (!indices.length) { showToast('⚠ Nessun ticker selezionato (indices vuoti)'); return; }
 
   const btn = document.getElementById('floatBtn');
   btn.disabled = true;
