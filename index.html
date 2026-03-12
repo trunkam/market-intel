@@ -630,6 +630,11 @@ body {
   display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
 }
 .src-lbl { font-size: 8px; color: var(--muted2); letter-spacing: 1px; text-transform: uppercase; margin-right: 4px; }
+.wf-badge { display:inline-block; font-size:8px; font-weight:700; padding:1px 4px; border-radius:2px; margin-right:3px; letter-spacing:.5px; vertical-align:middle; }
+.wf-fmp        { background:#1a1200; color:#f5a623; border:1px solid #f5a62340; }
+.wf-fmp-active { background:#1a0f00; color:#ff9800; border:1px solid #ff980040; }
+.wf-bz         { background:#001825; color:#29b6f6; border:1px solid #29b6f640; }
+.wf-ross       { background:#001a08; color:#00e676; border:1px solid #00e67640; }
 .src-link {
   font-size: 8px;
   color: var(--blue);
@@ -1324,22 +1329,28 @@ async function runScan() {
 
   try {
     // Screener FMP only
-    const [yahooTickers, microTickers, fmpTickers] = await Promise.all([
+    const [yahooTickers, microTickers, fmpTickers, fmpActiveTickers] = await Promise.all([
       Promise.resolve([]),
       USE_YAHOO_MICRO ? fetchYahooMicro() : Promise.resolve([]),
       fetchFmpGainers(),
+      fetchFmpMostActive(),
     ]);
 
-    fmpTickers.forEach(t => { t.source = 'FMP'; });
+    fmpTickers.forEach(t => { t.source = 'FMP'; t._fromGainers = true; });
+    fmpActiveTickers.forEach(t => { t.source = 'FMP'; t._fromMostActive = true; });
 
     const seen = new Set();
     const merged = [];
-    [...fmpTickers].forEach(t => {
+    // Gainers prima, poi most-active — deduplicati per ticker
+    [...fmpTickers, ...fmpActiveTickers].forEach(t => {
       if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
     });
 
     const parts = [];
-    if (fmpTickers.length) parts.push(`FMP: ${fmpTickers.length}`);
+    const gainersOnly  = fmpTickers.length;
+    const activeOnly   = fmpActiveTickers.filter(t => !fmpTickers.find(g => g.ticker === t.ticker)).length;
+    if (gainersOnly)  parts.push(`FMP gainers: ${gainersOnly}`);
+    if (activeOnly)   parts.push(`active: ${activeOnly}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     // Merge con persistenza — ticker con ross>=8 che escono dallo scan vengono mantenuti
@@ -1373,6 +1384,17 @@ async function runScan() {
     const filtered = applyFilters(merged);
     scanData = filtered;
     renderTickers(filtered);
+
+    // Auto-enrich con Benzinga se key configurata
+    const bzKeyAuto = getBzKey();
+    if (bzKeyAuto && masterData.length > 0) {
+      // Seleziona tutti i ticker per l'enrich automatico
+      setTimeout(async () => {
+        // Simula selezione di tutti i ticker
+        const allIndices = masterData.map((_, i) => i);
+        await runAutoEnrich(allIndices);
+      }, 500);
+    }
   } catch(e) {
     document.getElementById('tickerList').innerHTML = `
       <div class="state-box">
@@ -1483,6 +1505,40 @@ async function fetchYahooMicro() {
 }
 // Usa FMP /stable/gainers — restituisce anche micro-float che Yahoo esclude
 // Silenzioso se key non presente o errore (non blocca lo scan)
+async function fetchFmpMostActive() {
+  const fmpKey = getFmpKey();
+  if (!fmpKey) return [];
+  try {
+    setScanStatus('Recupero FMP most-active...');
+    const url = `/.netlify/functions/yahoo-proxy?mode=fmp&endpoint=most-active&apikey=${fmpKey}`;
+    const r = await fetchWithTimeout(url, 12000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
+    incrementFmpCount(1);
+    return data
+      .filter(q => q.symbol && q.price > 0)
+      .map(q => ({
+        ticker:      q.symbol,
+        name:        (q.name || '').substring(0, 40),
+        price:       q.price || 0,
+        chg:         q.changesPercentage || 0,
+        vol:         null,
+        avgVol:      null,
+        float:       null,
+        rvol:        null,
+        mktCap:      q.marketCap || null,
+        prePrice:    null,
+        preChg:      null,
+        preTime:     null,
+        marketState: 'REGULAR',
+        hasPrePost:  false,
+        source:      'FMP',
+      }))
+      .filter(t => t.price > 0 && t.chg > 0);
+  } catch(e) { return []; }
+}
+
 async function fetchFmpGainers() {
   const fmpKey = getFmpKey();
   if (!fmpKey) return []; // key non presente — skip silenzioso
@@ -1758,10 +1814,10 @@ function renderTickers(tickers, fromSort = false) {
         }
         return '--';
       })()}</div>
-      <div class="tr-name" title="${t.name}">
-        ${t.source === 'FMP'  ? '<span style="font-size:7px;color:var(--amber);opacity:.8;margin-right:3px;letter-spacing:.5px">FMP</span>' : ''}
-        ${t.source === 'YMF'  ? '<span style="font-size:7px;color:#4fc3f7;opacity:.8;margin-right:3px;letter-spacing:.5px">YMF</span>' : ''}
-        ${t.source === 'BOTH' ? '<span style="font-size:7px;color:#a5d6a7;opacity:.9;margin-right:3px">★</span>' : ''}
+      <div class="tr-name" id="name${si}" title="${t.name}">
+        ${t._fromMostActive && !t._fromGainers ? '<span class="wf-badge wf-fmp-active">ACTIVE</span>' : '<span class="wf-badge wf-fmp">FMP</span>'}
+        ${t._bzEnriched ? '<span class="wf-badge wf-bz">BZ</span>' : ''}
+        ${t._analysis ? '<span class="wf-badge wf-ross">★ ROSS</span>' : ''}
         ${t.name || '--'}
       </div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerBySymbol('${t.ticker}')">▶ ANALIZZA</button>
@@ -1811,6 +1867,132 @@ function toggleCheckAll(masterCb) {
   masterCb.style.background  = masterCb.checked ? 'var(--amber)' : 'transparent';
   masterCb.style.borderColor = masterCb.checked ? 'var(--amber)' : 'var(--border2)';
   updateFloatBtn();
+}
+
+/* ══════════════════════════════════
+   AUTO-ENRICH (post-scan, tutti i ticker)
+══════════════════════════════════ */
+async function runAutoEnrich(indices) {
+  const bzKey = getBzKey();
+  if (!bzKey || !indices.length) return;
+
+  const btn = document.getElementById('scanBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enrich...'; }
+
+  const symbols = indices.map(i => masterData[i]?.ticker).filter(Boolean);
+
+  // Helper IQR (stessa logica di runFloatEnrich)
+  function calcIqr(volumes) {
+    if (!volumes?.length) return null;
+    if (volumes.length < 3) return Math.round(volumes.reduce((a,b)=>a+b,0)/volumes.length);
+    const s = [...volumes].sort((a,b)=>a-b);
+    const q1 = s[Math.floor(s.length*0.25)];
+    const q3 = s[Math.floor(s.length*0.75)];
+    const iqr = q3-q1;
+    const clean = s.filter(v => v >= q1-1.5*iqr && v <= q3+1.5*iqr);
+    return clean.length ? Math.round(clean.reduce((a,b)=>a+b,0)/clean.length) : null;
+  }
+
+  // 1. quoteDelayed batch
+  const bzData = {};
+  try {
+    const r = await fetchWithTimeout(`https://api.benzinga.com/api/v2/quoteDelayed?symbols=${symbols.join(',')}&token=${bzKey}`, 12000);
+    if (r.ok) {
+      const raw = await r.json();
+      Object.entries(raw).forEach(([sym, q]) => {
+        if (!q) return;
+        bzData[sym] = {
+          float    : parseInt(q.sharesFloat)  || null,
+          vol      : parseInt(q.volume)       || null,
+          price    : q.lastTradePrice         || null,
+          chg      : q.changePercent          != null ? q.changePercent : null,
+          ethPrice : q.ethPrice               || null,
+          ethVol   : parseInt(q.ethVolume)    || null,
+          avgVol   : null,
+        };
+      });
+    }
+  } catch(e) { /* silenzioso */ }
+
+  // 2. /bars parallele per avgVol IQR
+  const today    = new Date();
+  const dateTo   = today.toISOString().split('T')[0];
+  const dateFrom = new Date(today - 16*864e5).toISOString().split('T')[0];
+  const barsRes  = await Promise.allSettled(
+    symbols.map(sym =>
+      fetchWithTimeout(`https://api.benzinga.com/api/v2/bars?symbols=${sym}&from=${dateFrom}&to=${dateTo}&interval=1D&token=${bzKey}`, 10000)
+        .then(r => r.ok ? r.json() : null)
+    )
+  );
+  barsRes.forEach((res, i) => {
+    const sym = symbols[i];
+    if (res.status !== 'fulfilled' || !res.value) return;
+    const entry = Array.isArray(res.value) ? res.value[0] : null;
+    if (!entry?.candles?.length) return;
+    const vols = entry.candles
+      .filter(c => c.dateTime?.substring(0,10) !== dateTo)
+      .map(c => parseInt(c.volume))
+      .filter(v => v > 0)
+      .slice(-10);
+    const avg = calcIqr(vols);
+    if (avg && bzData[sym]) bzData[sym].avgVol = avg;
+  });
+
+  // 3. Aggiorna masterData + DOM
+  indices.forEach(idx => {
+    const t = masterData[idx];
+    if (!t) return;
+    const bz = bzData[t.ticker] || {};
+    const domIdx = t._scanIdx ?? idx;
+
+    if (bz.float  != null) masterData[idx].float    = bz.float;
+    if (bz.vol    != null) masterData[idx].vol      = bz.vol;
+    if (bz.avgVol != null) masterData[idx].avgVol   = bz.avgVol;
+    if (bz.price  != null) masterData[idx].price    = bz.price;
+    if (bz.chg    != null) masterData[idx].chg      = bz.chg;
+    if (bz.ethPrice)       masterData[idx].ethPrice = bz.ethPrice;
+    if (bz.ethVol)         masterData[idx].ethVol   = bz.ethVol;
+
+    const vol    = bz.vol    != null ? bz.vol    : null;
+    const avgVol = bz.avgVol != null ? bz.avgVol : null;
+    if (vol && avgVol && avgVol > 0) masterData[idx].rvol = vol / avgVol;
+
+    masterData[idx]._bzEnriched  = true;
+    masterData[idx]._prelimRoss  = calcPrelimRoss(masterData[idx]);
+
+    if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
+    sessionCache[t.ticker].float  = masterData[idx].float;
+    sessionCache[t.ticker].vol    = masterData[idx].vol;
+    sessionCache[t.ticker].avgVol = masterData[idx].avgVol;
+    sessionCache[t.ticker].rvol   = masterData[idx].rvol;
+
+    // Aggiorna DOM
+    const floatCell = document.getElementById(`float${domIdx}`);
+    if (floatCell && bz.float) {
+      const isMicro = bz.float < 10e6;
+      floatCell.style.color      = isMicro ? 'var(--green)' : '';
+      floatCell.style.fontWeight = isMicro ? 'bold' : '';
+      floatCell.textContent      = fmtVol(bz.float);
+    }
+    const volCell = document.getElementById(`vol${domIdx}`);
+    if (volCell && bz.vol) volCell.textContent = fmtVol(bz.vol);
+    const rvolCell = document.getElementById(`rvol${domIdx}`);
+    if (rvolCell && masterData[idx].rvol) {
+      const rv = masterData[idx].rvol;
+      rvolCell.textContent = rv.toFixed(1) + 'x';
+      rvolCell.className = 'tr-rvol ' + (rv >= 3 ? 'rvol-hi' : 'rvol-mid');
+    }
+    updatePrelimRossCell(domIdx, masterData[idx]);
+
+    // Badge BZ aggiornato dopo re-render
+  });
+
+  // Riapplica filtri con dati aggiornati
+  const refiltered = applyFilters(masterData);
+  scanData = refiltered;
+  renderTickers(refiltered);
+
+  if (btn) { btn.disabled = false; btn.textContent = '▶ SCAN ORA'; }
 }
 
 /* ══════════════════════════════════
@@ -1961,7 +2143,8 @@ async function runFloatEnrich() {
       if (livePrice != null) masterData[idx].price = livePrice;
       if (bz.ethPrice)    masterData[idx].ethPrice = bz.ethPrice;
       if (bz.ethVol)      masterData[idx].ethVol   = bz.ethVol;
-      masterData[idx]._prelimRoss = calcPrelimRoss(masterData[idx]);
+      masterData[idx]._prelimRoss  = calcPrelimRoss(masterData[idx]);
+      masterData[idx]._bzEnriched = true;
 
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
       if (float)  sessionCache[t.ticker].float  = float;
@@ -2268,6 +2451,7 @@ async function runRossSelected() {
       const score = rep.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       scanData[idx]._analysis = rep;
+      masterData[scanData[idx]._scanIdx ?? idx]._analysis = rep;
       // Salva nel sessionCache
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
       sessionCache[t.ticker]._analysis = rep;
@@ -2275,6 +2459,18 @@ async function runRossSelected() {
 
       const row = document.getElementById(`tr${i}`);
       if (row && score >= 7) row.style.borderLeft = '2px solid var(--green)';
+
+      // Aggiungi badge ★ ROSS nella colonna nome
+      const nameCell2 = document.getElementById(`name${i}`);
+      if (nameCell2 && !nameCell2.querySelector('.wf-ross')) {
+        const rb = document.createElement('span');
+        rb.className = 'wf-badge wf-ross';
+        rb.textContent = '★ ROSS';
+        // Inserisci dopo badge BZ se presente, altrimenti in cima
+        const bzBadge = nameCell2.querySelector('.wf-bz');
+        if (bzBadge) bzBadge.after(rb);
+        else nameCell2.insertBefore(rb, nameCell2.firstChild);
+      }
     } catch(e) { console.warn('Ross error', t.ticker, e); }
 
     if (i < indices.length - 1) await sleep(800);
