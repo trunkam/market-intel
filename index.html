@@ -1910,11 +1910,12 @@ async function runFloatEnrich() {
   // Ripristina bottone con HTML originale (lo span era stato sovrascritto)
   btn.innerHTML = '⚡ FMP (<span id="floatBtnN">0</span>)';
   btn.disabled = false;
-  btn.style.display = 'none';
-  if (document.getElementById('selCount')) document.getElementById('selCount').textContent = '';
+  // Deseleziona tutti i checkbox
   document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
+  // Ricalcola stato bottoni con selezioni azzerate
+  updateFloatBtn();
   showToast(`✓ Enrich completato per ${updated}/${indices.length} ticker`);
 }
 
