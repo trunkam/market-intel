@@ -1312,28 +1312,34 @@ async function runScan() {
     <div class="state-box">
       <div class="spin"></div>
       <div class="state-title">SCANSIONE IN CORSO</div>
-      <div class="state-sub" id="scanStatus">Connessione a Yahoo + FMP...</div>
+      <div class="state-sub" id="scanStatus">Connessione a FMP + Yahoo μ-float...</div>
     </div>`;
 
+  const USE_YAHOO_PREDEFINED = false; // disabilita Yahoo predefined (small_cap_gainers, day_gainers, most_actives)
+
   try {
-    // Triplo screener in parallelo — Yahoo predefined + Yahoo micro-float + FMP
+    // Doppio screener in parallelo — Yahoo micro-float + FMP
     const [yahooTickers, microTickers, fmpTickers] = await Promise.all([
-      fetchYahooSmallCap(),
+      USE_YAHOO_PREDEFINED ? fetchYahooSmallCap() : Promise.resolve([]),
       fetchYahooMicro(),
       fetchFmpGainers(),
     ]);
 
-    // Merge deduplicato — micro-float prima (più vicini a Ross), poi FMP, poi Yahoo
+    // Merge deduplicato — FMP prima, poi micro-float; assegna source
+    const fmpSet  = new Set(fmpTickers.map(t => t.ticker));
+    const microSet = new Set(microTickers.map(t => t.ticker));
+    fmpTickers.forEach(t  => { t.source = microSet.has(t.ticker) ? 'BOTH' : 'FMP'; });
+    microTickers.forEach(t => { if (!fmpSet.has(t.ticker)) t.source = 'YMF'; });
+
     const seen = new Set();
     const merged = [];
-    [...microTickers, ...fmpTickers, ...yahooTickers].forEach(t => {
+    [...fmpTickers, ...microTickers, ...(USE_YAHOO_PREDEFINED ? yahooTickers : [])].forEach(t => {
       if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
     });
 
     const parts = [];
-    if (microTickers.length) parts.push(`Yahoo μ-float: ${microTickers.length}`);
     if (fmpTickers.length)   parts.push(`FMP: ${fmpTickers.length}`);
-    if (yahooTickers.length) parts.push(`Yahoo: ${yahooTickers.length}`);
+    if (microTickers.length) parts.push(`Yahoo μ-float: ${microTickers.length}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     merged.forEach((t, i) => { t._scanIdx = i; }); // assegna PRIMA di applyFilters
@@ -1735,7 +1741,12 @@ function renderTickers(tickers, fromSort = false) {
         }
         return '--';
       })()}</div>
-      <div class="tr-name" title="${t.name}">${t.name || '--'}</div>
+      <div class="tr-name" title="${t.name}">
+        ${t.source === 'FMP'  ? '<span style="font-size:7px;color:var(--amber);opacity:.8;margin-right:3px;letter-spacing:.5px">FMP</span>' : ''}
+        ${t.source === 'YMF'  ? '<span style="font-size:7px;color:#4fc3f7;opacity:.8;margin-right:3px;letter-spacing:.5px">YMF</span>' : ''}
+        ${t.source === 'BOTH' ? '<span style="font-size:7px;color:#a5d6a7;opacity:.9;margin-right:3px">★</span>' : ''}
+        ${t.name || '--'}
+      </div>
       <button class="analyze-row-btn" onclick="event.stopPropagation();analyzeTickerBySymbol('${t.ticker}')">▶ ANALIZZA</button>
     </div>`;
   }).join('');
