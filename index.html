@@ -1811,7 +1811,7 @@ async function runFloatEnrich() {
 
   const btn = document.getElementById('floatBtn');
   btn.disabled = true;
-  btn.textContent = `⏳ 0/${indices.length}`;
+  btn.innerHTML = `⏳ 0/${indices.length}`;
 
   let updated = 0;
   for (let i = 0; i < indices.length; i++) {
@@ -1819,7 +1819,7 @@ async function runFloatEnrich() {
     const t = scanData[idx];
     if (!t) continue;
 
-    btn.textContent = `⏳ ${i+1}/${indices.length}`;
+    btn.innerHTML = `⏳ ${i+1}/${indices.length}`;
 
     try {
       // 2 chiamate in parallelo: profile (vol+rvol) + shares-float (float)
@@ -1907,14 +1907,15 @@ async function runFloatEnrich() {
     if (i < indices.length - 1) await sleep(400);
   }
 
+  // Ripristina bottone con HTML originale (lo span era stato sovrascritto)
+  btn.innerHTML = '⚡ FMP (<span id="floatBtnN">0</span>)';
   btn.disabled = false;
   btn.style.display = 'none';
-  const fbn = document.getElementById('floatBtnN'); if (fbn) fbn.textContent = '0';
   if (document.getElementById('selCount')) document.getElementById('selCount').textContent = '';
   document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
-  showToast(`✓ Float aggiornato per ${updated}/${indices.length} ticker`);
+  showToast(`✓ Enrich completato per ${updated}/${indices.length} ticker`);
 }
 
 function showToast(msg) {
