@@ -842,6 +842,7 @@ body {
     <span class="sicon">☀️</span><span class="slabel">MKT</span>
   </div>
   <div class="vsep"></div>
+  <div class="ftag on" id="smartFilterBtn" onclick="toggleSmartFilter(this)" title="Filtra automaticamente CHG negativo e volume < 1000">⚡ SMART</div>
   <div class="ftag on" data-f="gapup"   onclick="toggleF(this)" title="Gap Up">↑ GAP</div>
   <div class="ftag on" data-f="volume"  onclick="toggleF(this)" title="Volume anomalo">VOL</div>
   <div class="ftag on" data-f="gainers" onclick="toggleF(this)" title="Top Gainers">▲</div>
@@ -1030,6 +1031,7 @@ async function fetchYahooViaNetlify(scrId, count=50) {
   return await r.json();
 }
 let activeFilters  = ['gapup','volume','gainers'];
+let smartFilter    = true; // filtra auto CHG<0 e VOL<1000
 let activeSessions = ['pre','intra'];
 let activePrice    = 'u20';
 let activeGap      = 3;
@@ -1258,6 +1260,12 @@ function toggleSession(s) {
     activeSessions.push(s);
     el.classList.add('on');
   }
+}
+
+function toggleSmartFilter(el) {
+  smartFilter = !smartFilter;
+  el.classList.toggle('on', smartFilter);
+  reapplyFilters();
 }
 
 function toggleF(el) {
@@ -1623,9 +1631,11 @@ function parseYahooQuotes(data) {
 function applyFilters(tickers) {
   let filtered = [...tickers];
 
-  // Filtro base — escludi sempre ticker con chg negativo o volume irrisorio
-  filtered = filtered.filter(t => t.chg == null || t.chg >= 0);       // no losers
-  filtered = filtered.filter(t => t.vol == null || t.vol >= 1000);    // no ticker illiquidi
+  // Filtro SMART — opzionale, attivabile/disattivabile dalla toolbar
+  if (smartFilter) {
+    filtered = filtered.filter(t => t.chg == null || t.chg >= 0);    // no losers
+    filtered = filtered.filter(t => t.vol == null || t.vol >= 1000); // no ticker illiquidi
+  }
 
   // Filtro prezzo
   if (activePrice === 'u5')       filtered = filtered.filter(t => t.price > 0 && t.price <= 5);
