@@ -1726,7 +1726,7 @@ function renderTickers(tickers, fromSort = false) {
     const outOfScanStyle = t._outOfScan ? 'opacity:.65;border-left:2px solid var(--amber)' : '';
     return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
       <div class="tr-check" onclick="event.stopPropagation()">
-        ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" onchange="updateFloatBtn()">` : ''}
+        ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
@@ -1761,9 +1761,12 @@ function renderTickers(tickers, fromSort = false) {
    CHECKBOX + FLOAT ENRICH
 ══════════════════════════════════ */
 function getCheckedIndices() {
+  // Restituisce indici numerici in scanData cercando per ticker symbol
   return [...document.querySelectorAll('[id^="chk"]:checked')]
-    .map(cb => parseInt(cb.dataset.scanidx ?? cb.id.replace('chk', '')))
-    .filter(i => !isNaN(i) && i >= 0);
+    .map(cb => cb.dataset.ticker)
+    .filter(Boolean)
+    .map(sym => scanData.findIndex(t => t.ticker === sym))
+    .filter(i => i >= 0);
 }
 
 function updateFloatBtn() {
@@ -1787,14 +1790,7 @@ function updateFloatBtn() {
   if (rossSelBtn) rossSelBtn.style.display = n > 0 ? 'inline-block' : 'none';
   if (rossSelBtnN) rossSelBtnN.textContent = n;
 
-  if (sel) {
-    if (n > 0) {
-      const idxList = indices.join(',');
-      sel.textContent = `${n} selezionati [idx:${idxList}]`;
-    } else {
-      sel.textContent = '';
-    }
-  }
+  if (sel) sel.textContent = n > 0 ? `${n} selezionati` : '';
 }
 
 function toggleCheckAll(masterCb) {
