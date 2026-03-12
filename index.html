@@ -1761,11 +1761,11 @@ function renderTickers(tickers, fromSort = false) {
    CHECKBOX + FLOAT ENRICH
 ══════════════════════════════════ */
 function getCheckedIndices() {
-  // Restituisce indici numerici in scanData cercando per ticker symbol
+  // Restituisce indici numerici cercando per ticker symbol in scanData
   return [...document.querySelectorAll('[id^="chk"]:checked')]
     .map(cb => cb.dataset.ticker)
     .filter(Boolean)
-    .map(sym => scanData.findIndex(t => t.ticker === sym))
+    .map(sym => masterData.findIndex(t => t.ticker === sym))
     .filter(i => i >= 0);
 }
 
@@ -1819,8 +1819,9 @@ async function runFloatEnrich() {
   let updated = 0;
   for (let i = 0; i < indices.length; i++) {
     const idx = indices[i];
-    const t = scanData[idx];
+    const t = masterData[idx];
     if (!t) continue;
+    const domIdx = t._scanIdx ?? idx; // usa _scanIdx per trovare celle DOM
 
     btn.innerHTML = `⏳ ${i+1}/${indices.length}`;
 
@@ -1851,13 +1852,13 @@ async function runFloatEnrich() {
         if (f) float = f.floatShares || null;
       }
 
-      if (float)     scanData[idx].float  = float;
-      if (vol)       scanData[idx].vol     = vol;
-      if (avgVol)    scanData[idx].avgVol  = avgVol;
-      if (rvol)      scanData[idx].rvol    = rvol;
-      if (liveChg  != null) scanData[idx].chg   = liveChg;
-      if (livePrice != null) scanData[idx].price = livePrice;
-      scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
+      if (float)     masterData[idx].float  = float;
+      if (vol)       masterData[idx].vol     = vol;
+      if (avgVol)    masterData[idx].avgVol  = avgVol;
+      if (rvol)      masterData[idx].rvol    = rvol;
+      if (liveChg  != null) masterData[idx].chg   = liveChg;
+      if (livePrice != null) masterData[idx].price = livePrice;
+      masterData[idx]._prelimRoss = calcPrelimRoss(masterData[idx]);
 
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
       if (float)     sessionCache[t.ticker].float  = float;
@@ -1866,7 +1867,7 @@ async function runFloatEnrich() {
       if (rvol)      sessionCache[t.ticker].rvol    = rvol;
 
       if (float) {
-        const floatCell = document.getElementById(`float${idx}`);
+        const floatCell = document.getElementById(`float${domIdx}`);
         if (floatCell) {
           const isMicro = float < 10e6;
           floatCell.style.color      = isMicro ? 'var(--green)' : '';
@@ -1875,11 +1876,11 @@ async function runFloatEnrich() {
         }
       }
       if (vol) {
-        const volCell = document.getElementById(`vol${idx}`);
+        const volCell = document.getElementById(`vol${domIdx}`);
         if (volCell) volCell.textContent = fmtVol(vol);
       }
       if (rvol) {
-        const rvolCell = document.getElementById(`rvol${idx}`);
+        const rvolCell = document.getElementById(`rvol${domIdx}`);
         if (rvolCell) {
           rvolCell.textContent = rvol.toFixed(1) + 'x';
           rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
@@ -1903,7 +1904,7 @@ async function runFloatEnrich() {
           }
         }
       }
-      updatePrelimRossCell(idx, scanData[idx]);
+      updatePrelimRossCell(domIdx, masterData[idx]);
       if (float || vol) { updated++; incrementFmpCount(2); } // 2 chiamate FMP
     } catch(e) { /* skip */ }
 
