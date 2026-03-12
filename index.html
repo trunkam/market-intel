@@ -852,39 +852,50 @@ body {
   <div class="ftag on" data-f="gainers" onclick="toggleF(this)" title="Top Gainers">▲</div>
   <div class="ftag"    data-f="losers"  onclick="toggleF(this)" title="Top Losers">▼</div>
   <div class="vsep"></div>
-  <div class="flabel">GAP%:</div>
-  <div class="ftag on" data-g="3"  onclick="toggleGap(this)">3%</div>
-  <div class="ftag"    data-g="5"  onclick="toggleGap(this)">5%</div>
-  <div class="ftag"    data-g="10" onclick="toggleGap(this)">10%</div>
-  <div class="ftag"    data-g="15" onclick="toggleGap(this)">15%</div>
-  <div class="ftag"    data-g="20" onclick="toggleGap(this)">20%</div>
-  <div class="ftag"    data-g="0"  onclick="toggleGap(this)">–</div>
+  <div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">
+    <div class="flabel">GAP%:</div>
+    <div class="ftag on" data-g="3"  onclick="toggleGap(this)">3%</div>
+    <div class="ftag"    data-g="5"  onclick="toggleGap(this)">5%</div>
+    <div class="ftag"    data-g="10" onclick="toggleGap(this)">10%</div>
+    <div class="ftag"    data-g="15" onclick="toggleGap(this)">15%</div>
+    <div class="ftag"    data-g="20" onclick="toggleGap(this)">20%</div>
+    <div class="ftag"    data-g="0"  onclick="toggleGap(this)">–</div>
+  </div>
   <div class="vsep"></div>
-  <div class="flabel">RVOL:</div>
-  <div class="ftag on" data-rv="0"  onclick="toggleRvol(this)">–</div>
-  <div class="ftag"    data-rv="2"  onclick="toggleRvol(this)">2x</div>
-  <div class="ftag"    data-rv="5"  onclick="toggleRvol(this)">5x</div>
-  <div class="ftag"    data-rv="10" onclick="toggleRvol(this)">10x</div>
+  <div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">
+    <div class="flabel">RVOL:</div>
+    <div class="ftag on" data-rv="0"  onclick="toggleRvol(this)">–</div>
+    <div class="ftag"    data-rv="2"  onclick="toggleRvol(this)">2x</div>
+    <div class="ftag"    data-rv="5"  onclick="toggleRvol(this)">5x</div>
+    <div class="ftag"    data-rv="10" onclick="toggleRvol(this)">10x</div>
+  </div>
   <div class="vsep"></div>
-  <div class="flabel">FLOAT:</div>
-  <div class="ftag"    data-fl="5"  onclick="toggleFloat(this)">5M</div>
-  <div class="ftag"    data-fl="10" onclick="toggleFloat(this)">10M</div>
-  <div class="ftag"    data-fl="20" onclick="toggleFloat(this)">20M</div>
-  <div class="ftag on" data-fl="0"  onclick="toggleFloat(this)">–</div>
+  <div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">
+    <div class="flabel">FLOAT:</div>
+    <div class="ftag"    data-fl="5"  onclick="toggleFloat(this)">5M</div>
+    <div class="ftag"    data-fl="10" onclick="toggleFloat(this)">10M</div>
+    <div class="ftag"    data-fl="20" onclick="toggleFloat(this)">20M</div>
+    <div class="ftag on" data-fl="0"  onclick="toggleFloat(this)">–</div>
+  </div>
   <div class="vsep"></div>
-  <div class="flabel">$:</div>
-  <div class="ftag"    data-p="u5"  onclick="togglePrice(this)">$5</div>
-  <div class="ftag"    data-p="u10" onclick="togglePrice(this)">$10</div>
-  <div class="ftag on" data-p="u20" onclick="togglePrice(this)">$20</div>
-  <div class="ftag"    data-p="u50" onclick="togglePrice(this)">$50</div>
-  <div class="ftag"    data-p="any" onclick="togglePrice(this)">∞</div>
+  <div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">
+    <div class="flabel">$:</div>
+    <div class="ftag on" id="minPrice1Btn" onclick="toggleMinPrice1(this)" title="Escludi sotto $1">&gt;$1</div>
+    <div class="ftag"    data-p="u5"  onclick="togglePrice(this)">$5</div>
+    <div class="ftag"    data-p="u10" onclick="togglePrice(this)">$10</div>
+    <div class="ftag on" data-p="u20" onclick="togglePrice(this)">$20</div>
+    <div class="ftag"    data-p="u50" onclick="togglePrice(this)">$50</div>
+    <div class="ftag"    data-p="any" onclick="togglePrice(this)">∞</div>
+  </div>
   <div class="vsep"></div>
-  <div class="flabel">ROSS:</div>
-  <div class="ftag on" data-rs="0"  onclick="toggleRoss(this)">–</div>
-  <div class="ftag"    data-rs="7"  onclick="toggleRoss(this)">≥7</div>
-  <div class="ftag"    data-rs="8"  onclick="toggleRoss(this)">≥8</div>
-  <div class="ftag"    data-rs="9"  onclick="toggleRoss(this)">≥9</div>
-  <div class="ftag"    data-rs="10" onclick="toggleRoss(this)">10</div>
+  <div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">
+    <div class="flabel">ROSS:</div>
+    <div class="ftag on" data-rs="0"  onclick="toggleRoss(this)">–</div>
+    <div class="ftag"    data-rs="7"  onclick="toggleRoss(this)">≥7</div>
+    <div class="ftag"    data-rs="8"  onclick="toggleRoss(this)">≥8</div>
+    <div class="ftag"    data-rs="9"  onclick="toggleRoss(this)">≥9</div>
+    <div class="ftag"    data-rs="10" onclick="toggleRoss(this)">10</div>
+  </div>
   <div style="margin-left:auto">
     <button class="settings-btn" onclick="openSettings()" title="Impostazioni API">⚙</button>
   </div>
@@ -1038,6 +1049,7 @@ let activeFilters  = ['gapup','volume','gainers'];
 let smartFilter    = true; // filtra auto CHG<0 e VOL<1000
 let activeSessions = ['pre','intra'];
 let activePrice    = 'u20';
+let minPrice1      = true; // filtra sotto $1
 let activeGap      = 3;
 let activeRvol     = 0;
 let activeFloat    = 0;
@@ -1276,6 +1288,12 @@ function toggleF(el) {
   const f = el.dataset.f;
   if (el.classList.contains('on')) { el.classList.remove('on'); activeFilters = activeFilters.filter(x => x !== f); }
   else { el.classList.add('on'); activeFilters.push(f); }
+}
+
+function toggleMinPrice1(el) {
+  minPrice1 = !minPrice1;
+  el.classList.toggle('on', minPrice1);
+  reapplyFilters();
 }
 
 function togglePrice(el) {
@@ -1640,6 +1658,9 @@ function applyFilters(tickers) {
     filtered = filtered.filter(t => t.chg == null || t.chg >= 0);    // no losers
     filtered = filtered.filter(t => t.vol == null || t.vol >= 1000); // no ticker illiquidi
   }
+
+  // Filtro minimo $1
+  if (minPrice1) filtered = filtered.filter(t => t.price == null || t.price >= 1);
 
   // Filtro prezzo
   if (activePrice === 'u5')       filtered = filtered.filter(t => t.price > 0 && t.price <= 5);
