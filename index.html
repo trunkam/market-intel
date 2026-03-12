@@ -1819,7 +1819,7 @@ async function runFloatEnrich() {
         fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`, 10000),
       ]);
 
-      let float = null, vol = null, avgVol = null, rvol = null;
+      let float = null, vol = null, avgVol = null, rvol = null, liveChg = null, livePrice = null;
 
       if (rProfile.ok) {
         const d = await rProfile.json();
@@ -1828,6 +1828,9 @@ async function runFloatEnrich() {
           vol    = p.volume        || null;
           avgVol = p.averageVolume || null;
           rvol   = (vol && avgVol && avgVol > 0) ? (vol / avgVol) : null;
+          // changePercentage è il valore live (premarket o intraday) — più aggiornato di biggest-gainers
+          if (p.changePercentage != null) liveChg = p.changePercentage;
+          if (p.price != null)            livePrice = p.price;
         }
       }
       if (rFloat.ok) {
@@ -1836,17 +1839,19 @@ async function runFloatEnrich() {
         if (f) float = f.floatShares || null;
       }
 
-      if (float)  scanData[idx].float  = float;
-      if (vol)    scanData[idx].vol     = vol;
-      if (avgVol) scanData[idx].avgVol  = avgVol;
-      if (rvol)   scanData[idx].rvol    = rvol;
+      if (float)     scanData[idx].float  = float;
+      if (vol)       scanData[idx].vol     = vol;
+      if (avgVol)    scanData[idx].avgVol  = avgVol;
+      if (rvol)      scanData[idx].rvol    = rvol;
+      if (liveChg  != null) scanData[idx].chg   = liveChg;
+      if (livePrice != null) scanData[idx].price = livePrice;
       scanData[idx]._prelimRoss = calcPrelimRoss(scanData[idx]);
 
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
-      if (float)  sessionCache[t.ticker].float  = float;
-      if (vol)    sessionCache[t.ticker].vol     = vol;
-      if (avgVol) sessionCache[t.ticker].avgVol  = avgVol;
-      if (rvol)   sessionCache[t.ticker].rvol    = rvol;
+      if (float)     sessionCache[t.ticker].float  = float;
+      if (vol)       sessionCache[t.ticker].vol     = vol;
+      if (avgVol)    sessionCache[t.ticker].avgVol  = avgVol;
+      if (rvol)      sessionCache[t.ticker].rvol    = rvol;
 
       if (float) {
         const floatCell = document.getElementById(`float${idx}`);
@@ -1866,6 +1871,24 @@ async function runFloatEnrich() {
         if (rvolCell) {
           rvolCell.textContent = rvol.toFixed(1) + 'x';
           rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
+        }
+      }
+      // Aggiorna prezzo e chg% live nella riga
+      if (liveChg != null || livePrice != null) {
+        const row = document.querySelector(`[data-ticker="${t.ticker}"]`);
+        if (row) {
+          if (livePrice != null) {
+            const priceCell = row.querySelector('.tr-price');
+            if (priceCell) priceCell.firstChild.textContent = `$${livePrice.toFixed(2)}`;
+          }
+          if (liveChg != null) {
+            const chgCell = row.querySelector('.tr-chg');
+            if (chgCell) {
+              const pfx = liveChg >= 0 ? '+' : '';
+              chgCell.textContent = `${pfx}${liveChg.toFixed(2)}%`;
+              chgCell.className = 'tr-chg ' + (liveChg > 0 ? 'chg-up' : liveChg < 0 ? 'chg-dn' : '');
+            }
+          }
         }
       }
       updatePrelimRossCell(idx, scanData[idx]);
