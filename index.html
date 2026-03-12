@@ -246,7 +246,7 @@ body {
 /* table header */
 .tbl-head {
   display: grid;
-  grid-template-columns: 24px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--s2);
@@ -271,7 +271,7 @@ body {
 
 .ticker-row {
   display: grid;
-  grid-template-columns: 24px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -289,8 +289,12 @@ body {
   letter-spacing: 1px;
   color: var(--amber);
 }
-.tr-price { font-size: 11px; color: var(--text); text-align: right; }
-.tr-chg   { font-size: 11px; font-weight: 600; text-align: right; }
+.tr-price { font-size: 11px; color: var(--text); text-align: right; line-height:1.3; }
+.tr-chg   { font-size: 11px; font-weight: 600; text-align: right; line-height:1.3; }
+.tr-eth   { font-size: 8px; opacity:.75; margin-top:1px; }
+.tr-eth-up   { color: var(--green); }
+.tr-eth-down { color: var(--red); }
+.tr-eth-flat { color: var(--amber); }
 .tr-vol   { font-size: 9px; color: var(--muted3); text-align: right; }
 .tr-float { font-size: 9px; color: var(--muted3); text-align: right; }
 .tr-rvol  { font-size: 9px; text-align: right; }
@@ -300,7 +304,7 @@ body {
 /* table header */
 .tbl-head {
   display: grid;
-  grid-template-columns: 28px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 28px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--s2);
@@ -325,7 +329,7 @@ body {
 
 .ticker-row {
   display: grid;
-  grid-template-columns: 28px 80px 70px 65px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 28px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -1807,8 +1811,14 @@ function renderTickers(tickers, fromSort = false) {
         ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
-      <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
-      <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
+      <div class="tr-price">
+        <div>$${t.price.toFixed(2)}</div>
+        ${t.ethPrice ? `<div class="tr-eth tr-eth-flat">ETH $${t.ethPrice.toFixed(2)}</div>` : ''}
+      </div>
+      <div class="tr-chg ${chgCls}">
+        <div>${chgPfx}${t.chg.toFixed(2)}%</div>
+        ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
+      </div>
       <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
       <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
       <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
@@ -1918,6 +1928,7 @@ async function runAutoEnrich(indices) {
           chg      : q.changePercent          != null ? q.changePercent : null,
           ethPrice : q.ethPrice               || null,
           ethVol   : parseInt(q.ethVolume)    || null,
+          prevClose: q.previousClosePrice     || null,
           avgVol   : null,
         };
       });
@@ -1958,10 +1969,14 @@ async function runAutoEnrich(indices) {
     if (bz.float  != null) masterData[idx].float    = bz.float;
     if (bz.vol    != null) masterData[idx].vol      = bz.vol;
     if (bz.avgVol != null) masterData[idx].avgVol   = bz.avgVol;
-    if (bz.price  != null) masterData[idx].price    = bz.price;
-    if (bz.chg    != null) masterData[idx].chg      = bz.chg;
-    if (bz.ethPrice)       masterData[idx].ethPrice = bz.ethPrice;
-    if (bz.ethVol)         masterData[idx].ethVol   = bz.ethVol;
+    // NON sovrascrivere chg e price con valori Benzinga — potrebbero essere afterhours
+    // I valori originali FMP (chg, price) restano per i filtri
+    if (bz.ethPrice)   masterData[idx].ethPrice  = bz.ethPrice;
+    if (bz.ethVol)     masterData[idx].ethVol    = bz.ethVol;
+    if (bz.prevClose)  masterData[idx].prevClose = bz.prevClose;
+    // Calcola ethChg% = (ethPrice - prevClose) / prevClose * 100
+    if (bz.ethPrice && bz.prevClose && bz.prevClose > 0)
+      masterData[idx].ethChg = ((bz.ethPrice - bz.prevClose) / bz.prevClose) * 100;
 
     const vol    = bz.vol    != null ? bz.vol    : null;
     const avgVol = bz.avgVol != null ? bz.avgVol : null;
@@ -2054,6 +2069,7 @@ async function runFloatEnrich() {
             chg      : q.changePercent           || null,
             ethPrice : q.ethPrice                || null,
             ethVol   : parseInt(q.ethVolume)     || null,
+            prevClose: q.previousClosePrice      || null,
           };
         });
       }
@@ -2151,8 +2167,11 @@ async function runFloatEnrich() {
       if (rvol)           masterData[idx].rvol     = rvol;
       if (liveChg  != null) masterData[idx].chg    = liveChg;
       if (livePrice != null) masterData[idx].price = livePrice;
-      if (bz.ethPrice)    masterData[idx].ethPrice = bz.ethPrice;
-      if (bz.ethVol)      masterData[idx].ethVol   = bz.ethVol;
+      if (bz.ethPrice)   masterData[idx].ethPrice  = bz.ethPrice;
+      if (bz.ethVol)     masterData[idx].ethVol    = bz.ethVol;
+      if (bz.prevClose)  masterData[idx].prevClose = bz.prevClose;
+      if (bz.ethPrice && bz.prevClose && bz.prevClose > 0)
+        masterData[idx].ethChg = ((bz.ethPrice - bz.prevClose) / bz.prevClose) * 100;
       masterData[idx]._prelimRoss  = calcPrelimRoss(masterData[idx]);
       masterData[idx]._bzEnriched = true;
 
