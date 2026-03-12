@@ -1880,19 +1880,33 @@ async function runFloatEnrich() {
     );
     barsResults.forEach((result, i) => {
       const sym = symbols[i];
-      if (result.status !== 'fulfilled' || !result.value) return;
+      if (result.status !== 'fulfilled' || !result.value) {
+        console.warn(`[bars] ${sym} failed:`, result.reason || 'no value');
+        return;
+      }
       const data = result.value;
       const entry = Array.isArray(data) ? data[0] : null;
-      if (!entry?.candles?.length) return;
+      if (!entry?.candles?.length) {
+        console.warn(`[bars] ${sym} no candles:`, data);
+        return;
+      }
+      console.log(`[bars] ${sym} candles:`, entry.candles.length, 'dateFrom:', dateFrom, 'dateTo:', dateTo);
       // Prendi volumi storici — escludi oggi (ultimo candle se data coincide)
       const todayStr = dateTo;
+      const allVols = entry.candles.map(c => ({ dt: c.dateTime, vol: parseInt(c.volume) }));
+      console.log(`[bars] ${sym} all vols:`, allVols);
       const historicalVols = entry.candles
-        .filter(c => !c.dateTime?.startsWith(todayStr))
+        .filter(c => {
+          const candleDate = c.dateTime?.substring(0, 10);
+          return candleDate !== todayStr;
+        })
         .map(c => parseInt(c.volume))
         .filter(v => v > 0);
+      console.log(`[bars] ${sym} historicalVols:`, historicalVols);
       // Limita agli ultimi 10 giorni
       const last10 = historicalVols.slice(-10);
       const avgVol = calcIqrAvgVol(last10);
+      console.log(`[bars] ${sym} avgVol IQR:`, avgVol);
       if (avgVol && bzData[sym]) bzData[sym].avgVol = avgVol;
     });
   }
