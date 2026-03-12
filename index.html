@@ -1790,6 +1790,11 @@ function renderTickers(tickers, fromSort = false) {
     rossPage = 0;
   }
 
+  // Label sessione extended hours
+  const etNow = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
+  const etHour = etNow.getHours() + etNow.getMinutes()/60;
+  const extLabel = etHour < 9.5 ? 'PRE' : 'AH';
+
   document.getElementById('tickerList').innerHTML = tickers.map((t, i) => {
     const chgCls = t.chg > 0 ? 'chg-up' : t.chg < 0 ? 'chg-down' : 'chg-flat';
     const chgPfx = t.chg > 0 ? '+' : '';
@@ -1813,11 +1818,11 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">
         <div>$${t.price.toFixed(2)}</div>
-        ${t.ethPrice ? `<div class="tr-eth tr-eth-flat">ETH $${t.ethPrice.toFixed(2)}</div>` : ''}
+        ${t.ethPrice ? `<div class="tr-eth tr-eth-flat">${extLabel} $${t.ethPrice.toFixed(2)}</div>` : ''}
       </div>
       <div class="tr-chg ${chgCls}">
         <div>${chgPfx}${t.chg.toFixed(2)}%</div>
-        ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
+        ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
       </div>
       <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
       <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
@@ -2286,8 +2291,9 @@ function selectTicker(i) {
   // Grafico embed
   loadTVChart(t.ticker);
 
-  // Se ha analisi Claude mostra dettaglio
+  // Mostra dettaglio: analisi Claude se disponibile, altrimenti stima preliminare
   if (t._analysis) showRossDetail(t);
+  else showPrelimDetail(t);
 }
 
 function loadTVChart(ticker) {
@@ -2298,6 +2304,91 @@ function loadTVChart(ticker) {
     <iframe src="${src}" allowtransparency="true" scrolling="no" allowfullscreen></iframe>
     <a class="chart-expand-btn" href="https://www.tradingview.com/chart/?symbol=${ticker}" target="_blank">⛶ ESPANDI</a>
   `;
+}
+
+function showPrelimDetail(t) {
+  const analysisScroll = document.getElementById('analysisScroll');
+  if (!analysisScroll) return;
+
+  // Calcola score per ogni pillar disponibile
+  const f  = t.float;
+  const p  = t.price;
+  const g  = Math.abs(t.chg || 0);
+  const rv = t.rvol;
+
+  function floatScore(f)  { if(!f) return null; if(f<2e6) return 10; if(f<5e6) return 9; if(f<10e6) return 7; if(f<20e6) return 5; if(f<50e6) return 3; return 1; }
+  function priceScore(p)  { if(p>=1&&p<3) return 9; if(p>=3&&p<10) return 8; if(p>=10&&p<20) return 6; if(p>=20&&p<50) return 3; if(p<1) return 4; return 1; }
+  function gapScore(g)    { if(g>=50) return 10; if(g>=30) return 9; if(g>=20) return 8; if(g>=10) return 6; if(g>=5) return 4; return 2; }
+  function rvolScore(rv)  { if(!rv) return null; if(rv>=10) return 10; if(rv>=5) return 9; if(rv>=3) return 7; if(rv>=2) return 5; return 2; }
+
+  const scores = {
+    float:   floatScore(f),
+    price:   priceScore(p),
+    gap:     gapScore(g),
+    rvol:    rvolScore(rv),
+    catalyst: null, // solo Claude
+  };
+
+  function scoreColor(s) { if(s==null) return 'var(--muted3)'; if(s>=8) return 'var(--green)'; if(s>=5) return 'var(--amber)'; return 'var(--red)'; }
+  function scoreLabel(s) { return s != null ? s : '?'; }
+
+  // Pillars mini header
+  const pMini = [
+    { k:'float', l:'FLOAT' }, { k:'catalyst', l:'CATAL.' },
+    { k:'price', l:'PRICE' }, { k:'rvol', l:'VOL' }, { k:'gap', l:'GAP' }
+  ];
+  document.getElementById('pillarsMini').innerHTML = pMini.map(({k,l}) => {
+    const s = scores[k];
+    const cls = s == null ? 'pmc-na' : s >= 7 ? 'pmc-hi' : s >= 4 ? 'pmc-mid' : 'pmc-low';
+    return `<div class="pmc ${cls}" title="${l}">${l[0]}<span>${scoreLabel(s)}</span></div>`;
+  }).join('');
+
+  // Box dettaglio preliminare
+  const fmtFloat = f ? (f >= 1e6 ? (f/1e6).toFixed(2)+'M' : (f/1e3).toFixed(0)+'K') : '--';
+  const fmtRvol  = rv ? rv.toFixed(1)+'x' : '--';
+
+  analysisScroll.innerHTML = `
+    <div style="padding:12px 14px">
+      <div style="color:var(--amber);font-size:9px;letter-spacing:1px;margin-bottom:10px">⚡ STIMA PRELIMINARE — manca Catalyst (Claude)</div>
+      <div class="pillars-grid">
+        <div class="pg-cell">
+          <div class="pgc-name">FLOAT</div>
+          <div class="pgc-val" style="color:${scoreColor(scores.float)}">${scoreLabel(scores.float)}</div>
+          <div class="pgc-sub">${fmtFloat}</div>
+        </div>
+        <div class="pg-cell">
+          <div class="pgc-name">CATAL.</div>
+          <div class="pgc-val pv-na">?</div>
+          <div class="pgc-sub">solo Claude</div>
+        </div>
+        <div class="pg-cell">
+          <div class="pgc-name">PRICE</div>
+          <div class="pgc-val" style="color:${scoreColor(scores.price)}">${scoreLabel(scores.price)}</div>
+          <div class="pgc-sub">$${p?.toFixed(2)||'--'}</div>
+        </div>
+        <div class="pg-cell">
+          <div class="pgc-name">VOL</div>
+          <div class="pgc-val" style="color:${scoreColor(scores.rvol)}">${scoreLabel(scores.rvol)}</div>
+          <div class="pgc-sub">${fmtRvol}</div>
+        </div>
+        <div class="pg-cell">
+          <div class="pgc-name">GAP%</div>
+          <div class="pgc-val" style="color:${scoreColor(scores.gap)}">${scoreLabel(scores.gap)}</div>
+          <div class="pgc-sub">${t.chg>=0?'+':''}${t.chg?.toFixed(1)||'--'}%</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;color:var(--muted2);font-size:10px;line-height:1.6">
+        <div>Float: <span style="color:var(--text)">${fmtFloat}</span></div>
+        <div>Prezzo: <span style="color:var(--text)">$${p?.toFixed(2)||'--'}</span></div>
+        <div>Gap%: <span style="color:${t.chg>=0?'var(--green)':'var(--red)'}">${t.chg>=0?'+':''}${t.chg?.toFixed(2)||'--'}%</span></div>
+        <div>RVOL: <span style="color:var(--text)">${fmtRvol}</span></div>
+        ${t.ethPrice ? `<div>AH Price: <span style="color:var(--amber)">$${t.ethPrice.toFixed(2)}</span></div>` : ''}
+        ${t.ethChg != null ? `<div>AH CHG%: <span style="color:${t.ethChg>=0?'var(--green)':'var(--red)'}">${t.ethChg>=0?'+':''}${t.ethChg.toFixed(2)}%</span></div>` : ''}
+      </div>
+      <div style="margin-top:16px;text-align:center">
+        <button class="scan-btn" style="font-size:10px;padding:6px 16px" onclick="analyzeTickerBySymbol('${t.ticker}')">▶ ANALIZZA CON CLAUDE</button>
+      </div>
+    </div>`;
 }
 
 function showRossDetail(t) {
