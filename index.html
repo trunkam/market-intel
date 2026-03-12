@@ -1315,31 +1315,27 @@ async function runScan() {
       <div class="state-sub" id="scanStatus">Connessione a FMP + Yahoo μ-float...</div>
     </div>`;
 
-  const USE_YAHOO_PREDEFINED = false; // disabilita Yahoo predefined (small_cap_gainers, day_gainers, most_actives)
+  const USE_YAHOO_PREDEFINED = false; // disabilita Yahoo predefined
+  const USE_YAHOO_MICRO     = false; // disabilita Yahoo micro-float
 
   try {
-    // Doppio screener in parallelo — Yahoo micro-float + FMP
+    // Screener FMP only
     const [yahooTickers, microTickers, fmpTickers] = await Promise.all([
-      USE_YAHOO_PREDEFINED ? fetchYahooSmallCap() : Promise.resolve([]),
-      fetchYahooMicro(),
+      Promise.resolve([]),
+      USE_YAHOO_MICRO ? fetchYahooMicro() : Promise.resolve([]),
       fetchFmpGainers(),
     ]);
 
-    // Merge deduplicato — FMP prima, poi micro-float; assegna source
-    const fmpSet  = new Set(fmpTickers.map(t => t.ticker));
-    const microSet = new Set(microTickers.map(t => t.ticker));
-    fmpTickers.forEach(t  => { t.source = microSet.has(t.ticker) ? 'BOTH' : 'FMP'; });
-    microTickers.forEach(t => { if (!fmpSet.has(t.ticker)) t.source = 'YMF'; });
+    fmpTickers.forEach(t => { t.source = 'FMP'; });
 
     const seen = new Set();
     const merged = [];
-    [...fmpTickers, ...microTickers, ...(USE_YAHOO_PREDEFINED ? yahooTickers : [])].forEach(t => {
+    [...fmpTickers].forEach(t => {
       if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
     });
 
     const parts = [];
-    if (fmpTickers.length)   parts.push(`FMP: ${fmpTickers.length}`);
-    if (microTickers.length) parts.push(`Yahoo μ-float: ${microTickers.length}`);
+    if (fmpTickers.length) parts.push(`FMP: ${fmpTickers.length}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     merged.forEach((t, i) => { t._scanIdx = i; }); // assegna PRIMA di applyFilters
