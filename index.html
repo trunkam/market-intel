@@ -1873,7 +1873,7 @@ async function runFloatEnrich() {
     const barsResults = await Promise.allSettled(
       symbols.map(sym =>
         fetchWithTimeout(
-          `https://api.benzinga.com/api/v1/bars?symbols=${sym}&from=${dateFrom}&to=${dateTo}&interval=1D&token=${bzKey}`,
+          `https://api.benzinga.com/api/v2/bars?symbols=${sym}&from=${dateFrom}&to=${dateTo}&interval=1D&token=${bzKey}`,
           10000
         ).then(r => r.ok ? r.json() : null)
       )
