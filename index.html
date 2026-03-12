@@ -904,8 +904,7 @@ body {
     </div>
     <hr class="sp-divider">
     <div class="sp-field">
-      <div class="sp-label">Twelve Data API Key <span style="color:var(--muted3);font-size:9px">(vol + rvol per ticker FMP)</span></div>
-      <input class="sp-input" id="tdKeyInput" placeholder="la tua Twelve Data key..." />
+
       <div class="sp-status" id="tdStatus">Opzionale — popola Volume e RVOL per i ticker FMP</div>
     </div>
     <hr class="sp-divider">
@@ -925,6 +924,7 @@ body {
       <div class="sh-title">SCREENER SMALL CAP</div>
       <div class="sh-count">Trovati: <span id="tickerCount">0</span></div>
       <div class="sh-source">Fonte: <span id="sourceLabel">--</span></div>
+      <div id="preMktWarning" style="display:none;font-size:9px;color:#ff9800;background:rgba(255,152,0,.1);border:1px solid rgba(255,152,0,.3);border-radius:3px;padding:2px 7px;margin-left:6px;letter-spacing:.4px">⚠ PREMARKET — CHG% = chiusura ieri · premi ⚡ per aggiornare</div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
         <span id="selCount" style="font-size:9px;color:var(--muted3)"></span>
         <button class="float-btn" id="rossSelBtn" onclick="runRossSelected()" style="display:none;border-color:var(--amber);color:var(--amber)">🎯 ROSS (<span id="rossSelBtnN">0</span>)</button>
@@ -1047,14 +1047,14 @@ window.addEventListener('DOMContentLoaded', () => {
   const fmp = localStorage.getItem('mi_fmpkey');
   if (fmp) document.getElementById('fmpKeyInput').value = fmp;
   const fmp2 = localStorage.getItem('mi_fmpkey2');
-  const td   = localStorage.getItem('mi_tdkey');
   if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
   updateKeyStatus();
   updateFmpDisplay();
+  checkPremarketWarning();
+  setInterval(checkPremarketWarning, 60000); // aggiorna ogni minuto
 });
 
 function openSettings() {
-  if (td)   document.getElementById('tdKeyInput').value = td;
   document.getElementById('settingsOverlay').classList.add('open');
 }
 function closeSettings() {
@@ -1071,9 +1071,6 @@ function saveSettings() {
   const fmp2 = document.getElementById('fmpKey2Input').value.trim();
   if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
   else localStorage.removeItem('mi_fmpkey2');
-  const td = document.getElementById('tdKeyInput')?.value?.trim();
-  if (td) localStorage.setItem('mi_tdkey', td);
-  else localStorage.removeItem('mi_tdkey');
   updateKeyStatus();
   closeSettings();
 }
@@ -1101,7 +1098,6 @@ function updateKeyStatus() {
   if (fs) { fs.textContent = fmp ? '✓ Key presente — screener micro-cap attivo' : 'Opzionale — aggiunge ticker FMP gainers'; fs.className = 'sp-status ' + (fmp ? 'ok' : ''); }
 }
 function getApiKey() { return localStorage.getItem('mi_apikey') || document.getElementById('apiKeyInput').value.trim(); }
-function getTdKey()  { return localStorage.getItem('mi_tdkey')  || document.getElementById('tdKeyInput')?.value?.trim() || ''; }
 
 /* ══════════════════════════════════
    COST TRACKING
@@ -1338,6 +1334,19 @@ async function runScan() {
     if (fmpTickers.length) parts.push(`FMP: ${fmpTickers.length}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
+    // Merge con persistenza — ticker con ross>=8 che escono dallo scan vengono mantenuti
+    const newTickerSet = new Set(merged.map(t => t.ticker));
+    if (masterData.length > 0) {
+      masterData.forEach(t => {
+        const score = t._analysis?.rossScore || t._prelimRoss || 0;
+        if (score >= 8 && !newTickerSet.has(t.ticker)) {
+          // Ticker uscito dallo scan ma con ross>=8 — mantieni con flag
+          t._outOfScan = true;
+          merged.push(t);
+        }
+      });
+    }
+
     merged.forEach((t, i) => { t._scanIdx = i; }); // assegna PRIMA di applyFilters
     merged.forEach(t => {
       t._prelimRoss = calcPrelimRoss(t);
@@ -1367,6 +1376,30 @@ async function runScan() {
 
   document.getElementById('tickerCount').textContent = scanData.length;
   document.getElementById('scanBtn').disabled = false;
+  checkPremarketWarning();
+}
+
+function checkPremarketWarning() {
+  // Orario ET — premarket = prima delle 9:30, after hours = dopo le 16:00
+  const now = new Date();
+  const etOffset = -5; // EST (USA East, no DST adjustment needed per questo uso)
+  const etHour = (now.getUTCHours() + 24 + etOffset) % 24;
+  const etMin  = now.getUTCMinutes();
+  const etTime = etHour + etMin / 60;
+  const isPremarket  = etTime < 9.5;
+  const isAfterHours = etTime >= 16.0;
+  const warning = document.getElementById('preMktWarning');
+  if (warning) {
+    if (isPremarket) {
+      warning.style.display = 'inline-block';
+      warning.textContent = '⚠ PREMARKET — CHG% = chiusura ieri · premi ⚡ per aggiornare';
+    } else if (isAfterHours) {
+      warning.style.display = 'inline-block';
+      warning.textContent = '⚠ AFTER HOURS — dati potrebbero non essere aggiornati';
+    } else {
+      warning.style.display = 'none';
+    }
+  }
 }
 
 function setScanStatus(txt) {
@@ -1482,31 +1515,6 @@ async function fetchFmpGainers() {
       })
       .filter(t => t.price > 0 && t.chg > 3);
 
-    // Enrich vol+rvol via Twelve Data batch — 1 sola chiamata per tutti i ticker FMP
-    const tdKey = getTdKey();
-    if (tdKey && tickers.length > 0) {
-      try {
-        const symbols = tickers.map(t => t.ticker).join(',');
-        const tdUrl = `https://api.twelvedata.com/quote?symbol=${symbols}&apikey=${tdKey}`;
-        const tdR = await fetchWithTimeout(tdUrl, 10000);
-        if (tdR.ok) {
-          const tdData = await tdR.json();
-          // Twelve Data restituisce oggetto singolo se 1 simbolo, oggetto con chiavi se multipli
-          const quotes = tickers.length === 1
-            ? { [tickers[0].ticker]: tdData }
-            : tdData;
-          tickers.forEach(t => {
-            const q = quotes[t.ticker];
-            if (!q || q.status === 'error') return;
-            const vol    = parseInt(q.volume)         || null;
-            const avgVol = parseInt(q.average_volume) || null;
-            if (vol)    t.vol    = vol;
-            if (avgVol) t.avgVol = avgVol;
-            if (vol && avgVol && avgVol > 0) t.rvol = vol / avgVol;
-          });
-        }
-      } catch(e) { /* silenzioso — vol/rvol resteranno null */ }
-    }
 
     return tickers;
   } catch(e) {
@@ -1715,11 +1723,12 @@ function renderTickers(tickers, fromSort = false) {
 
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
     const si = t._scanIdx ?? i; // indice reale in scanData
-    return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s">
+    const outOfScanStyle = t._outOfScan ? 'opacity:.65;border-left:2px solid var(--amber)' : '';
+    return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
       <div class="tr-check" onclick="event.stopPropagation()">
         ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" onchange="updateFloatBtn()">` : ''}
       </div>
-      <div class="tr-ticker">${t.ticker}</div>
+      <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">$${t.price.toFixed(2)}${priceBadge}</div>
       <div class="tr-chg ${chgCls}">${chgPfx}${t.chg.toFixed(2)}%</div>
       <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
