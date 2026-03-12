@@ -1787,7 +1787,14 @@ function updateFloatBtn() {
   if (rossSelBtn) rossSelBtn.style.display = n > 0 ? 'inline-block' : 'none';
   if (rossSelBtnN) rossSelBtnN.textContent = n;
 
-  if (sel) sel.textContent = n > 0 ? `${n} selezionati` : '';
+  if (sel) {
+    if (n > 0) {
+      const idxList = indices.join(',');
+      sel.textContent = `${n} selezionati [idx:${idxList}]`;
+    } else {
+      sel.textContent = '';
+    }
+  }
 }
 
 function toggleCheckAll(masterCb) {
@@ -1907,16 +1914,17 @@ async function runFloatEnrich() {
     if (i < indices.length - 1) await sleep(400);
   }
 
-  // Ripristina bottone con HTML originale (lo span era stato sovrascritto)
+  // Ripristina bottone — ricostruisci HTML originale
   btn.innerHTML = '⚡ FMP (<span id="floatBtnN">0</span>)';
   btn.disabled = false;
+  btn.style.display = 'inline-block'; // sempre visibile dopo enrich
   // Deseleziona tutti i checkbox
   document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
-  // Ricalcola stato bottoni con selezioni azzerate
-  updateFloatBtn();
   showToast(`✓ Enrich completato per ${updated}/${indices.length} ticker`);
+  // Ricalcola stato bottoni dopo che il DOM ha aggiornato lo span
+  setTimeout(() => updateFloatBtn(), 50);
 }
 
 function showToast(msg) {
