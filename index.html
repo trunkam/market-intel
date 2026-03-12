@@ -1567,6 +1567,10 @@ function parseYahooQuotes(data) {
 function applyFilters(tickers) {
   let filtered = [...tickers];
 
+  // Filtro base — escludi sempre ticker con chg negativo o volume irrisorio
+  filtered = filtered.filter(t => t.chg == null || t.chg >= 0);       // no losers
+  filtered = filtered.filter(t => t.vol == null || t.vol >= 1000);    // no ticker illiquidi
+
   // Filtro prezzo
   if (activePrice === 'u5')       filtered = filtered.filter(t => t.price > 0 && t.price <= 5);
   else if (activePrice === 'u10') filtered = filtered.filter(t => t.price > 0 && t.price <= 10);
@@ -1880,33 +1884,18 @@ async function runFloatEnrich() {
     );
     barsResults.forEach((result, i) => {
       const sym = symbols[i];
-      if (result.status !== 'fulfilled' || !result.value) {
-        console.warn(`[bars] ${sym} failed:`, result.reason || 'no value');
-        return;
-      }
+      if (result.status !== 'fulfilled' || !result.value) return;
       const data = result.value;
       const entry = Array.isArray(data) ? data[0] : null;
-      if (!entry?.candles?.length) {
-        console.warn(`[bars] ${sym} no candles:`, data);
-        return;
-      }
-      console.log(`[bars] ${sym} candles:`, entry.candles.length, 'dateFrom:', dateFrom, 'dateTo:', dateTo);
-      // Prendi volumi storici — escludi oggi (ultimo candle se data coincide)
+      if (!entry?.candles?.length) return;
+      // Prendi volumi storici — escludi oggi
       const todayStr = dateTo;
-      const allVols = entry.candles.map(c => ({ dt: c.dateTime, vol: parseInt(c.volume) }));
-      console.log(`[bars] ${sym} all vols:`, allVols);
       const historicalVols = entry.candles
-        .filter(c => {
-          const candleDate = c.dateTime?.substring(0, 10);
-          return candleDate !== todayStr;
-        })
+        .filter(c => c.dateTime?.substring(0, 10) !== todayStr)
         .map(c => parseInt(c.volume))
         .filter(v => v > 0);
-      console.log(`[bars] ${sym} historicalVols:`, historicalVols);
-      // Limita agli ultimi 10 giorni
-      const last10 = historicalVols.slice(-10);
-      const avgVol = calcIqrAvgVol(last10);
-      console.log(`[bars] ${sym} avgVol IQR:`, avgVol);
+      // Limita agli ultimi 10 giorni e calcola avgVol con IQR
+      const avgVol = calcIqrAvgVol(historicalVols.slice(-10));
       if (avgVol && bzData[sym]) bzData[sym].avgVol = avgVol;
     });
   }
