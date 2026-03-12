@@ -1863,15 +1863,16 @@ async function runFloatEnrich() {
     try {
       const bz = bzData[t.ticker] || {};
 
-      let float    = bz.float    || null;
-      let avgVol   = bz.avgVol   || null;
-      let vol      = bz.vol      || null;
-      let livePrice= bz.price    || null;
-      let liveChg  = bz.chg      != null ? bz.chg : null;
+      let float    = bz.float    != null ? bz.float    : null;
+      let avgVol   = bz.avgVol   != null ? bz.avgVol   : null;
+      let vol      = bz.vol      != null ? bz.vol      : null;
+      let livePrice= bz.price    != null ? bz.price    : null;
+      let liveChg  = bz.chg      != null ? bz.chg      : null;
       let rvol     = null;
 
-      // ── FMP fallback — solo se Benzinga non configurata o dati mancanti ──
-      if (fmpKey && (!vol || !float)) {
+      // ── FMP fallback — solo se Benzinga non configurata o non ha risposto ──
+      const bzHasData = bzKey && Object.keys(bzData).length > 0;
+      if (fmpKey && !bzHasData) {
         try {
           const calls = [
             !vol   ? fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`, 10000) : Promise.resolve(null),
@@ -1893,7 +1894,9 @@ async function runFloatEnrich() {
             const f = Array.isArray(d) ? d[0] : d;
             if (f && !float) float = f.floatShares || null;
           }
-          if (vol || float) incrementFmpCount(2);
+          // Conta solo le chiamate FMP effettivamente fatte
+          const fmpCallsMade = (calls[0] !== null ? 1 : 0) + (calls[1] !== null ? 1 : 0);
+          if (fmpCallsMade > 0) incrementFmpCount(fmpCallsMade);
         } catch(e) { /* skip FMP */ }
       }
 
