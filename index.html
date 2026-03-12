@@ -900,6 +900,8 @@ body {
     <div class="sp-field">
       <div class="sp-label">FMP API Key 2 <span style="color:var(--muted3);font-size:9px">(backup — usata automaticamente dopo 249 chiamate)</span></div>
       <input class="sp-input" id="fmpKey2Input" placeholder="la tua FMP key di backup..." />
+      <div class="sp-label" style="margin-top:12px">Benzinga API Key <span style="color:var(--muted3);font-size:9px">(float + avgVol + short interest)</span></div>
+      <input class="sp-input" id="bzKeyInput" placeholder="la tua Benzinga key..." />
       <div class="sp-status" id="fmpStatus2">Opzionale — si attiva automaticamente quando la key principale è esaurita</div>
     </div>
     <hr class="sp-divider">
@@ -928,7 +930,7 @@ body {
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
         <span id="selCount" style="font-size:9px;color:var(--muted3)"></span>
         <button class="float-btn" id="rossSelBtn" onclick="runRossSelected()" style="display:none;border-color:var(--amber);color:var(--amber)">🎯 ROSS (<span id="rossSelBtnN">0</span>)</button>
-        <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">⚡ FMP (<span id="floatBtnN">0</span>)</button>
+        <button class="float-btn" id="floatBtn" onclick="runFloatEnrich()">⚡ Enrich (<span id="floatBtnN">0</span>)</button>
       </div>
     </div>
     <div class="tbl-head">
@@ -1048,6 +1050,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (fmp) document.getElementById('fmpKeyInput').value = fmp;
   const fmp2 = localStorage.getItem('mi_fmpkey2');
   if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
+  const bz = localStorage.getItem('mi_bzkey');
+  if (bz) document.getElementById('bzKeyInput').value = bz;
   updateKeyStatus();
   updateFmpDisplay();
   checkPremarketWarning();
@@ -1069,6 +1073,9 @@ function saveSettings() {
   const fmp = document.getElementById('fmpKeyInput').value.trim();
   if (fmp) localStorage.setItem('mi_fmpkey', fmp);
   const fmp2 = document.getElementById('fmpKey2Input').value.trim();
+  const bz2  = document.getElementById('bzKeyInput')?.value?.trim();
+  if (bz2) localStorage.setItem('mi_bzkey', bz2);
+  else localStorage.removeItem('mi_bzkey');
   if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
   else localStorage.removeItem('mi_fmpkey2');
   updateKeyStatus();
@@ -1076,6 +1083,7 @@ function saveSettings() {
 }
 
 // Restituisce la key FMP attiva — usa key2 automaticamente se fmpCount >= 200
+function getBzKey()   { return localStorage.getItem('mi_bzkey')  || document.getElementById('bzKeyInput')?.value?.trim() || ''; }
 function getFmpKey() {
   const count = parseInt(localStorage.getItem('mi_fmpcount') || '0', 10);
   const key2  = localStorage.getItem('mi_fmpkey2') || document.getElementById('fmpKey2Input')?.value?.trim() || '';
@@ -1802,70 +1810,114 @@ function toggleCheckAll(masterCb) {
 }
 
 /* ══════════════════════════════════
-   CHECKBOX + FLOAT ENRICH (FMP)
+   ENRICH (BENZINGA PRIMARY · FMP FALLBACK)
 ══════════════════════════════════ */
 async function runFloatEnrich() {
+  const bzKey  = getBzKey();
   const fmpKey = getFmpKey();
 
-  if (!fmpKey) { alert('Inserisci la FMP key nelle impostazioni ⚙'); return; }
+  if (!bzKey && !fmpKey) { alert('Inserisci la Benzinga key (o FMP) nelle impostazioni ⚙'); return; }
 
   const indices = getCheckedIndices();
-  if (!indices.length) { showToast('⚠ Nessun ticker selezionato (indices vuoti)'); return; }
+  if (!indices.length) { showToast('⚠ Nessun ticker selezionato'); return; }
 
   const btn = document.getElementById('floatBtn');
   btn.disabled = true;
-  btn.innerHTML = `⏳ 0/${indices.length}`;
+  btn.innerHTML = `⏳ enrich…`;
+
+  const symbols = indices.map(i => masterData[i]?.ticker).filter(Boolean);
+
+  // ══ BENZINGA quoteDelayed — 1 chiamata batch per tutti i ticker ══
+  const bzData = {}; // { TICKER: { float, avgVol, vol, price, chg, ethPrice, ethVol } }
+  if (bzKey && symbols.length) {
+    try {
+      const bzUrl = `https://api.benzinga.com/api/v2/quoteDelayed?symbols=${symbols.join(',')}&token=${bzKey}`;
+      const bzR = await fetchWithTimeout(bzUrl, 12000);
+      if (bzR.ok) {
+        const raw = await bzR.json();
+        Object.entries(raw).forEach(([sym, q]) => {
+          if (!q) return;
+          bzData[sym] = {
+            float    : parseInt(q.sharesFloat)   || null,
+            avgVol   : parseInt(q.averageVolume) || null,
+            vol      : parseInt(q.volume)        || null,
+            price    : q.lastTradePrice          || null,
+            chg      : q.changePercent           || null,
+            ethPrice : q.ethPrice                || null,  // premarket/afterhours price
+            ethVol   : parseInt(q.ethVolume)     || null,  // premarket/afterhours volume
+          };
+        });
+      }
+    } catch(e) { console.warn('Benzinga quoteDelayed error:', e); }
+  }
 
   let updated = 0;
   for (let i = 0; i < indices.length; i++) {
     const idx = indices[i];
-    const t = masterData[idx];
+    const t   = masterData[idx];
     if (!t) continue;
-    const domIdx = t._scanIdx ?? idx; // usa _scanIdx per trovare celle DOM
+    const domIdx = t._scanIdx ?? idx;
 
-    btn.innerHTML = `⏳ ${i+1}/${indices.length}`;
+    btn.innerHTML = `⏳ ${i+1}/${symbols.length}`;
 
     try {
-      // 2 chiamate in parallelo: profile (vol+rvol) + shares-float (float)
-      const [rProfile, rFloat] = await Promise.all([
-        fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`, 10000),
-        fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`, 10000),
-      ]);
+      const bz = bzData[t.ticker] || {};
 
-      let float = null, vol = null, avgVol = null, rvol = null, liveChg = null, livePrice = null;
+      let float    = bz.float    || null;
+      let avgVol   = bz.avgVol   || null;
+      let vol      = bz.vol      || null;
+      let livePrice= bz.price    || null;
+      let liveChg  = bz.chg      != null ? bz.chg : null;
+      let rvol     = null;
 
-      if (rProfile.ok) {
-        const d = await rProfile.json();
-        const p = Array.isArray(d) ? d[0] : d;
-        if (p) {
-          vol    = p.volume        || null;
-          avgVol = p.averageVolume || null;
-          rvol   = (vol && avgVol && avgVol > 0) ? (vol / avgVol) : null;
-          // changePercentage è il valore live (premarket o intraday) — più aggiornato di biggest-gainers
-          if (p.changePercentage != null) liveChg = p.changePercentage;
-          if (p.price != null)            livePrice = p.price;
-        }
+      // ── FMP fallback — solo se Benzinga non configurata o dati mancanti ──
+      if (fmpKey && (!vol || !float)) {
+        try {
+          const calls = [
+            !vol   ? fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`, 10000) : Promise.resolve(null),
+            !float ? fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=shares-float&symbol=${t.ticker}&apikey=${fmpKey}`, 10000) : Promise.resolve(null),
+          ];
+          const [rProfile, rFloat] = await Promise.all(calls);
+          if (rProfile?.ok) {
+            const d = await rProfile.json();
+            const p = Array.isArray(d) ? d[0] : d;
+            if (p) {
+              if (!vol)       vol       = p.volume        || null;
+              if (!avgVol)    avgVol    = p.averageVolume || null;
+              if (!livePrice && p.price != null) livePrice = p.price;
+              if (liveChg == null && p.changePercentage != null) liveChg = p.changePercentage;
+            }
+          }
+          if (rFloat?.ok) {
+            const d = await rFloat.json();
+            const f = Array.isArray(d) ? d[0] : d;
+            if (f && !float) float = f.floatShares || null;
+          }
+          if (vol || float) incrementFmpCount(2);
+        } catch(e) { /* skip FMP */ }
       }
-      if (rFloat.ok) {
-        const d = await rFloat.json();
-        const f = Array.isArray(d) ? d[0] : d;
-        if (f) float = f.floatShares || null;
-      }
 
-      if (float)     masterData[idx].float  = float;
-      if (vol)       masterData[idx].vol     = vol;
-      if (avgVol)    masterData[idx].avgVol  = avgVol;
-      if (rvol)      masterData[idx].rvol    = rvol;
-      if (liveChg  != null) masterData[idx].chg   = liveChg;
+      // Calcola RVOL
+      if (vol && avgVol && avgVol > 0) rvol = vol / avgVol;
+
+      // ── Aggiorna masterData ──
+      if (float)          masterData[idx].float    = float;
+      if (vol)            masterData[idx].vol      = vol;
+      if (avgVol)         masterData[idx].avgVol   = avgVol;
+      if (rvol)           masterData[idx].rvol     = rvol;
+      if (liveChg  != null) masterData[idx].chg    = liveChg;
       if (livePrice != null) masterData[idx].price = livePrice;
+      if (bz.ethPrice)    masterData[idx].ethPrice = bz.ethPrice;
+      if (bz.ethVol)      masterData[idx].ethVol   = bz.ethVol;
       masterData[idx]._prelimRoss = calcPrelimRoss(masterData[idx]);
 
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
-      if (float)     sessionCache[t.ticker].float  = float;
-      if (vol)       sessionCache[t.ticker].vol     = vol;
-      if (avgVol)    sessionCache[t.ticker].avgVol  = avgVol;
-      if (rvol)      sessionCache[t.ticker].rvol    = rvol;
+      if (float)  sessionCache[t.ticker].float  = float;
+      if (vol)    sessionCache[t.ticker].vol    = vol;
+      if (avgVol) sessionCache[t.ticker].avgVol = avgVol;
+      if (rvol)   sessionCache[t.ticker].rvol   = rvol;
 
+      // ── Aggiorna DOM ──
       if (float) {
         const floatCell = document.getElementById(`float${domIdx}`);
         if (floatCell) {
@@ -1886,7 +1938,6 @@ async function runFloatEnrich() {
           rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
         }
       }
-      // Aggiorna prezzo e chg% live nella riga
       if (liveChg != null || livePrice != null) {
         const row = document.querySelector(`[data-ticker="${t.ticker}"]`);
         if (row) {
@@ -1905,14 +1956,12 @@ async function runFloatEnrich() {
         }
       }
       updatePrelimRossCell(domIdx, masterData[idx]);
-      if (float || vol) { updated++; incrementFmpCount(2); } // 2 chiamate FMP
+      if (float || vol) updated++;
     } catch(e) { /* skip */ }
-
-    if (i < indices.length - 1) await sleep(400);
   }
 
-  // Ripristina bottone — ricostruisci HTML originale
-  btn.innerHTML = '⚡ FMP (<span id="floatBtnN">0</span>)';
+  // Ripristina bottone
+  btn.innerHTML = '⚡ Enrich (<span id="floatBtnN">0</span>)';
   btn.disabled = false;
   btn.style.display = 'inline-block'; // sempre visibile dopo enrich
   // Deseleziona tutti i checkbox
