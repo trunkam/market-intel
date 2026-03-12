@@ -1827,6 +1827,19 @@ async function runFloatEnrich() {
 
   const symbols = indices.map(i => masterData[i]?.ticker).filter(Boolean);
 
+  // ══ Helper IQR — calcola avgVol robusto escludendo outlier ══
+  function calcIqrAvgVol(volumes) {
+    if (!volumes || volumes.length < 3) return volumes?.length ? volumes.reduce((a,b) => a+b,0)/volumes.length : null;
+    const sorted = [...volumes].sort((a,b) => a-b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    const lo  = q1 - 1.5 * iqr;
+    const hi  = q3 + 1.5 * iqr;
+    const clean = sorted.filter(v => v >= lo && v <= hi);
+    return clean.length ? Math.round(clean.reduce((a,b) => a+b,0) / clean.length) : null;
+  }
+
   // ══ BENZINGA quoteDelayed — 1 chiamata batch per tutti i ticker ══
   const bzData = {}; // { TICKER: { float, avgVol, vol, price, chg, ethPrice, ethVol } }
   if (bzKey && symbols.length) {
@@ -1839,16 +1852,49 @@ async function runFloatEnrich() {
           if (!q) return;
           bzData[sym] = {
             float    : parseInt(q.sharesFloat)   || null,
-            avgVol   : parseInt(q.averageVolume) || null,
+            avgVol   : null, // verrà calcolato da /bars con IQR
             vol      : parseInt(q.volume)        || null,
             price    : q.lastTradePrice          || null,
             chg      : q.changePercent           || null,
-            ethPrice : q.ethPrice                || null,  // premarket/afterhours price
-            ethVol   : parseInt(q.ethVolume)     || null,  // premarket/afterhours volume
+            ethPrice : q.ethPrice                || null,
+            ethVol   : parseInt(q.ethVolume)     || null,
           };
         });
       }
     } catch(e) { console.warn('Benzinga quoteDelayed error:', e); }
+  }
+
+  // ══ BENZINGA /bars — calcola avgVol IQR su 10 giorni per ogni ticker ══
+  if (bzKey && symbols.length) {
+    const today    = new Date();
+    const dateTo   = today.toISOString().split('T')[0];
+    const dateFrom = new Date(today - 16 * 864e5).toISOString().split('T')[0]; // 16 giorni = ~10 trading days
+    // Chiamate parallele per tutti i ticker
+    const barsResults = await Promise.allSettled(
+      symbols.map(sym =>
+        fetchWithTimeout(
+          `https://api.benzinga.com/api/v1/bars?symbols=${sym}&from=${dateFrom}&to=${dateTo}&interval=1D&token=${bzKey}`,
+          10000
+        ).then(r => r.ok ? r.json() : null)
+      )
+    );
+    barsResults.forEach((result, i) => {
+      const sym = symbols[i];
+      if (result.status !== 'fulfilled' || !result.value) return;
+      const data = result.value;
+      const entry = Array.isArray(data) ? data[0] : null;
+      if (!entry?.candles?.length) return;
+      // Prendi volumi storici — escludi oggi (ultimo candle se data coincide)
+      const todayStr = dateTo;
+      const historicalVols = entry.candles
+        .filter(c => !c.dateTime?.startsWith(todayStr))
+        .map(c => parseInt(c.volume))
+        .filter(v => v > 0);
+      // Limita agli ultimi 10 giorni
+      const last10 = historicalVols.slice(-10);
+      const avgVol = calcIqrAvgVol(last10);
+      if (avgVol && bzData[sym]) bzData[sym].avgVol = avgVol;
+    });
   }
 
   let updated = 0;
