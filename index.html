@@ -2280,6 +2280,74 @@ async function runAutoEnrich(indices) {
   renderTickers(refiltered);
 
   if (btn) { btn.disabled = false; btn.textContent = '▶ SCAN ORA'; }
+
+  // Avvia fetch news in background — sequenziale con delay
+  runAutoNews(indices);
+}
+
+async function runAutoNews(indices) {
+  const bzKey = getBzKey();
+  if (!bzKey || !indices.length) return;
+
+  // Filtra solo ticker senza news già caricate
+  const tickers = indices
+    .map(i => masterData[i])
+    .filter(t => t && t._bzNews === undefined)
+    .map(t => t.ticker);
+
+  if (!tickers.length) return;
+
+  try {
+    const today = new Date();
+    const from  = new Date(today - 2 * 24 * 60 * 60 * 1000);
+    const dateFrom = from.toISOString().split('T')[0];
+    const todayStr = today.toISOString().split('T')[0];
+
+    // Una sola chiamata batch con tutti i ticker
+    const url = `https://api.benzinga.com/api/v2/news?tickers=${tickers.join(',')}&dateFrom=${dateFrom}&displayOutput=headline&pageSize=50&sort=created:desc&token=${bzKey}`;
+    const r = await fetchWithTimeout(url, 10000);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!Array.isArray(data)) return;
+
+    // Raggruppa news per ticker
+    const newsByTicker = {};
+    tickers.forEach(tk => { newsByTicker[tk] = []; });
+    data.forEach(n => {
+      const isToday = n.created ?
+        new Date(n.created).toISOString().split('T')[0] === todayStr : false;
+      const item = { ...n, isToday };
+      (n.stocks || []).forEach(s => {
+        if (newsByTicker[s.name] !== undefined) {
+          newsByTicker[s.name].push(item);
+        }
+      });
+    });
+
+    // Aggiorna masterData e DOM per ogni ticker
+    tickers.forEach(tk => {
+      const news = newsByTicker[tk] || [];
+      const mdIdx = masterData.findIndex(x => x.ticker === tk);
+      if (mdIdx >= 0) masterData[mdIdx]._bzNews = news;
+
+      // Aggiorna pillar catalyst nel DOM se il box è aperto su questo ticker
+      const cell = document.getElementById('catalyst-cell-' + tk);
+      if (cell) {
+        if (news.length > 0) {
+          const title = news[0].title || '';
+          const short = title.length > 35 ? title.substring(0,35)+'…' : title;
+          const hasToday = news.some(n => n.isToday);
+          const color = hasToday ? 'var(--green)' : 'var(--amber)';
+          const label = hasToday ? 'oggi' : 'ieri';
+          cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
+            '<div class="pgc-val" style="color:' + color + '">⚡</div>' +
+            '<div class="pgc-sub" style="color:' + color + ';font-size:7px">' + label + ': ' + short + '</div>';
+        } else {
+          cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
+        }
+      }
+    });
+  } catch(e) { console.warn('AutoNews error:', e); }
 }
 
 /* ══════════════════════════════════
