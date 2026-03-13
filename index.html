@@ -2359,9 +2359,9 @@ async function runFloatEnrich() {
       let liveChg  = bz.chg      != null ? bz.chg      : null;
       let rvol     = null;
 
-      // ── FMP fallback — solo se Benzinga non configurata o non ha risposto ──
+      // ── FMP fallback — solo se float ancora mancante dopo Benzinga ──
       const bzHasData = bzKey && Object.keys(bzData).length > 0;
-      if (fmpKey && !bzHasData) {
+      if (fmpKey && (!bzHasData || !float)) {
         try {
           const calls = [
             !vol   ? fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`, 10000) : Promise.resolve(null),
