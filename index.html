@@ -1775,6 +1775,28 @@ async function runPreScan() {
   }
 }
 
+async function fetchBzNews(ticker) {
+  const bzKey = getBzKey();
+  if (!bzKey) return [];
+  try {
+    const today = new Date();
+    const from  = new Date(today - 2 * 24 * 60 * 60 * 1000); // ultimi 2 giorni
+    const dateFrom = from.toISOString().split('T')[0];
+    const url = `https://api.benzinga.com/api/v2/news?tickers=${ticker}&dateFrom=${dateFrom}&displayOutput=headline&pageSize=5&sort=created:desc&token=${bzKey}`;
+    const r = await fetchWithTimeout(url, 8000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
+    // Aggiungi flag isToday per contestualizzare
+    const todayStr = today.toISOString().split('T')[0];
+    return data.map(n => ({
+      ...n,
+      isToday: n.created ? n.created.includes(todayStr) || 
+        new Date(n.created).toISOString().split('T')[0] === todayStr : false
+    }));
+  } catch(e) { return []; }
+}
+
 async function fetchFmpGainers() {
   const fmpKey = getFmpKey();
   if (!fmpKey) return []; // key non presente — skip silenzioso
@@ -2604,17 +2626,17 @@ function showPrelimDetail(t) {
 
   analysisScroll.innerHTML = `
     <div style="padding:12px 14px">
-      <div style="color:var(--amber);font-size:9px;letter-spacing:1px;margin-bottom:10px">⚡ STIMA PRELIMINARE — manca Catalyst (Claude)</div>
+      <div style="color:var(--amber);font-size:9px;letter-spacing:1px;margin-bottom:10px">⚡ STIMA PRELIMINARE — Catalyst da Benzinga</div>
       <div class="pillars-grid">
         <div class="pg-cell">
           <div class="pgc-name">FLOAT</div>
           <div class="pgc-val" style="color:${scoreColor(scores.float)}">${scoreLabel(scores.float)}</div>
           <div class="pgc-sub">${fmtFloat}</div>
         </div>
-        <div class="pg-cell">
+        <div class="pg-cell" id="catalyst-cell-${t.ticker}">
           <div class="pgc-name">CATAL.</div>
           <div class="pgc-val pv-na">?</div>
-          <div class="pgc-sub">solo Claude</div>
+          <div class="pgc-sub">carico...</div>
         </div>
         <div class="pg-cell">
           <div class="pgc-name">PRICE</div>
@@ -2644,6 +2666,28 @@ function showPrelimDetail(t) {
         <button class="scan-btn" style="font-size:10px;padding:6px 16px" onclick="analyzeTickerBySymbol('${t.ticker}')">▶ ANALIZZA CON CLAUDE</button>
       </div>
     </div>`;
+
+
+  // Fetch news Benzinga in background — aggiorna pillar catalyst
+  fetchBzNews(t.ticker).then(news => {
+    const cell = document.getElementById('catalyst-cell-' + t.ticker);
+    if (!cell) return;
+    const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
+    if (mdIdx >= 0) masterData[mdIdx]._bzNews = news;
+    t._bzNews = news;
+    if (news.length > 0) {
+      const title = news[0].title || '';
+      const short = title.length > 35 ? title.substring(0,35)+'\u2026' : title;
+      const hasToday = news.some(n => n.isToday);
+      const color = hasToday ? 'var(--green)' : 'var(--amber)';
+      const label = hasToday ? 'oggi' : 'ieri';
+      cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
+        '<div class="pgc-val" style="color:' + color + '">\u26a1</div>' +
+        '<div class="pgc-sub" style="color:' + color + ';font-size:7px" title="' + title.replace(/"/g,"'") + '">' + label + ': ' + short + '</div>';
+    } else {
+      cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
+    }
+  });
 }
 
 function showRossDetail(t) {
@@ -3062,6 +3106,12 @@ async function analyzeTickerIdx(idx) {
 }
 
 async function callClaude(ticker, apiKey) {
+  // Includi news Benzinga se disponibili
+  const bzNewsContext = ticker._bzNews && ticker._bzNews.length > 0
+    ? `\nNOTIZIE BENZINGA (ultime ${ticker._bzNews.length} — priorità: oggi > ieri):\n` +
+      ticker._bzNews.map(n => `- [${n.isToday ? 'OGGI' : 'IERI'}] ${n.title}`).join('\n')
+    : '';
+
   const prompt = `Trader esperto, metodo Ross Cameron 5 Pillars momentum trading.
 
 TICKER DA ANALIZZARE: ${ticker.ticker}
@@ -3073,7 +3123,7 @@ Dati screener (fonte: Yahoo Finance):
 - Rel. Volume: ${ticker.rvol ? ticker.rvol.toFixed(1)+'x' : 'n/a'}
 - Float / Shares Out: ${ticker.float ? fmtVol(ticker.float) : 'n/a'}
 - Market Cap: ${ticker.mktCap ? '$'+fmtVol(ticker.mktCap) : 'n/a'}
-- Nome: ${ticker.name || 'sconosciuto'}${ticker.prePrice ? `\n- Pre-Market: $${ticker.prePrice.toFixed(2)} (${ticker.preChg > 0?'+':''}${(ticker.preChg||0).toFixed(2)}%)` : ''}
+- Nome: ${ticker.name || 'sconosciuto'}${ticker.prePrice ? `\n- Pre-Market: $${ticker.prePrice.toFixed(2)} (${ticker.preChg > 0?'+':''}${(ticker.preChg||0).toFixed(2)}%)` : ''}${bzNewsContext}
 
 COMPITO:
 1. Cerca notizie e catalyst recenti su ${ticker.ticker} (ultime 24h)
