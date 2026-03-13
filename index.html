@@ -2695,9 +2695,21 @@ function showPrelimDetail(t) {
           <div class="pgc-sub">${fmtFloat}</div>
         </div>
         <div class="pg-cell" id="catalyst-cell-${t.ticker}">
-          <div class="pgc-name">CATAL.</div>
-          <div class="pgc-val pv-na">?</div>
-          <div class="pgc-sub">carico...</div>
+          ${(function(){
+            const news = t._fhNews;
+            if (news && news.length > 0) {
+              const title = news[0].headline || '';
+              const short = title.length > 35 ? title.substring(0,35)+'…' : title;
+              const hasToday = news.some(n => n.isToday);
+              const color = hasToday ? 'var(--green)' : 'var(--amber)';
+              const label = hasToday ? 'oggi' : 'ieri';
+              return '<div class="pgc-name">CATAL.</div>' +
+                '<div class="pgc-val" style="color:'+color+'">⚡</div>' +
+                '<div class="pgc-sub" style="color:'+color+';font-size:7px">'+label+': '+short+'</div>';
+            }
+            return '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div>' +
+              '<div class="pgc-sub">'+(news === undefined ? 'carico...' : 'nessuna news')+'</div>';
+          })()}
         </div>
         <div class="pg-cell">
           <div class="pgc-name">PRICE</div>
