@@ -1986,8 +1986,8 @@ function calcPrelimRoss(t) {
   return divisor > 0 ? Math.round(score / divisor) : 0;
 }
 
-function updatePrelimRossCell(idx, t) {
-  const cell = document.getElementById(`ross-${t?.ticker || idx}`);
+function updatePrelimRossCell(ticker, t) {
+  const cell = document.getElementById(`ross-${ticker}`);
   if (!cell) return;
   // Non sovrascrivere se c'è già un'analisi Ross reale
   if (t._analysis?.rossScore) return;
@@ -2051,9 +2051,9 @@ function renderTickers(tickers, fromSort = false) {
         <div>${chgPfx}${t.chg.toFixed(2)}%</div>
         ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
       </div>
-      <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
-      <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
-      <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
+      <div class="tr-vol" id="vol-${t.ticker}">${fmtVol(t.vol)}</div>
+      <div class="tr-float" id="float-${t.ticker}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
+      <div class="tr-rvol ${rvolCls}" id="rvol-${t.ticker}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
       <div class="tr-ross" id="ross-${t.ticker}">${(() => {
         if (t._analysis?.rossScore) {
           const s = t._analysis.rossScore;
@@ -2196,7 +2196,7 @@ async function runAutoEnrich(indices) {
     const t = masterData[idx];
     if (!t) return;
     const bz = bzData[t.ticker] || {};
-    const domIdx = t._scanIdx ?? idx;
+    const ticker = t.ticker;
 
     if (bz.float  != null) masterData[idx].float    = bz.float;
     if (bz.vol    != null) masterData[idx].vol      = bz.vol;
@@ -2224,22 +2224,22 @@ async function runAutoEnrich(indices) {
     sessionCache[t.ticker].rvol   = masterData[idx].rvol;
 
     // Aggiorna DOM
-    const floatCell = document.getElementById(`float${domIdx}`);
+    const floatCell = document.getElementById(`float-${ticker}`);
     if (floatCell && bz.float) {
       const isMicro = bz.float < 10e6;
       floatCell.style.color      = isMicro ? 'var(--green)' : '';
       floatCell.style.fontWeight = isMicro ? 'bold' : '';
       floatCell.textContent      = fmtVol(bz.float);
     }
-    const volCell = document.getElementById(`vol${domIdx}`);
+    const volCell = document.getElementById(`vol-${ticker}`);
     if (volCell && bz.vol) volCell.textContent = fmtVol(bz.vol);
-    const rvolCell = document.getElementById(`rvol${domIdx}`);
+    const rvolCell = document.getElementById(`rvol-${ticker}`);
     if (rvolCell && masterData[idx].rvol) {
       const rv = masterData[idx].rvol;
       rvolCell.textContent = rv.toFixed(1) + 'x';
       rvolCell.className = 'tr-rvol ' + (rv >= 3 ? 'rvol-hi' : 'rvol-mid');
     }
-    updatePrelimRossCell(domIdx, masterData[idx]);
+    updatePrelimRossCell(ticker, masterData[idx]);
 
     // Badge BZ aggiornato dopo re-render
   });
@@ -2345,7 +2345,7 @@ async function runFloatEnrich() {
     const idx = indices[i];
     const t   = masterData[idx];
     if (!t) continue;
-    const domIdx = t._scanIdx ?? idx;
+    const ticker = t.ticker;
 
     btn.innerHTML = `⏳ ${i+1}/${symbols.length}`;
 
@@ -2415,7 +2415,7 @@ async function runFloatEnrich() {
 
       // ── Aggiorna DOM ──
       if (float) {
-        const floatCell = document.getElementById(`float${domIdx}`);
+        const floatCell = document.getElementById(`float-${ticker}`);
         if (floatCell) {
           const isMicro = float < 10e6;
           floatCell.style.color      = isMicro ? 'var(--green)' : '';
@@ -2424,11 +2424,11 @@ async function runFloatEnrich() {
         }
       }
       if (vol) {
-        const volCell = document.getElementById(`vol${domIdx}`);
+        const volCell = document.getElementById(`vol-${ticker}`);
         if (volCell) volCell.textContent = fmtVol(vol);
       }
       if (rvol) {
-        const rvolCell = document.getElementById(`rvol${domIdx}`);
+        const rvolCell = document.getElementById(`rvol-${ticker}`);
         if (rvolCell) {
           rvolCell.textContent = rvol.toFixed(1) + 'x';
           rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
@@ -2451,7 +2451,7 @@ async function runFloatEnrich() {
           }
         }
       }
-      updatePrelimRossCell(domIdx, masterData[idx]);
+      updatePrelimRossCell(ticker, masterData[idx]);
       if (float || vol) updated++;
     } catch(e) { /* skip */ }
   }
@@ -2798,7 +2798,9 @@ async function runRossSelected() {
       const score = rep.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       scanData[idx]._analysis = rep;
-      masterData[scanData[idx]._scanIdx ?? idx]._analysis = rep;
+      // Aggiorna masterData per ticker — stabile indipendentemente da sort/filter
+      const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
+      if (mdIdx >= 0) masterData[mdIdx]._analysis = rep;
       // Salva nel sessionCache
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
       sessionCache[t.ticker]._analysis = rep;
