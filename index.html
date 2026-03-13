@@ -1306,9 +1306,9 @@ function bzStateToBzSession(state) {
 
 function updateClock() {
   const now = new Date();
-  document.getElementById('clock').textContent =
-    now.toLocaleTimeString('it-IT',{hour12:false}) + ' · ' +
-    now.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'});
+  const etTime = now.toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
+  const etDate = now.toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',timeZone:'America/New_York'});
+  document.getElementById('clock').textContent = 'ET ' + etTime + ' · ' + etDate;
 
   const et  = getMarketTime('America/New_York');
   const wd  = et.day >= 1 && et.day <= 5;
@@ -1330,6 +1330,10 @@ function updateClock() {
   // Mode label
   const mode = ms === 'pre' ? '⚡ PRE-MARKET' : ms === 'open' ? '● INTRADAY' : ms === 'after' ? '◎ AFTER-HRS' : '○ FUORI SESSIONE';
   document.getElementById('modeLabel').textContent = mode;
+
+  // Nascondi riga AH/PRE durante sessione REGULAR
+  const ahRow = document.getElementById('ahRow');
+  if (ahRow) ahRow.style.display = ms === 'open' ? 'none' : '';
 }
 
 setInterval(updateClock, 1000);
@@ -1506,6 +1510,7 @@ async function runScan() {
         // Simula selezione di tutti i ticker
         const allIndices = masterData.map((_, i) => i);
         await runAutoEnrich(allIndices);
+        runAutoNews(allIndices);
       }, 500);
     }
   } catch(e) {
@@ -2310,7 +2315,6 @@ async function runAutoEnrich(indices) {
 
   if (btn) { btn.disabled = false; btn.textContent = '▶ SCAN ORA'; }
 
-  runAutoNews(indices);
 }
 
 /* ══════════════════════════════════
