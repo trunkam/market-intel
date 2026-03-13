@@ -1298,9 +1298,9 @@ function bzStateToBzSession(state) {
 
 function updateClock() {
   const now = new Date();
-  document.getElementById('clock').textContent =
-    now.toLocaleTimeString('it-IT',{hour12:false}) + ' · ' +
-    now.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'});
+  const etTime = now.toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const etDate = now.toLocaleDateString('en-US',{timeZone:'America/New_York',day:'2-digit',month:'2-digit'});
+  document.getElementById('clock').textContent = `ET ${etTime} · ${etDate}`;
 
   const et  = getMarketTime('America/New_York');
   const wd  = et.day >= 1 && et.day <= 5;
@@ -2021,6 +2021,7 @@ function renderTickers(tickers, fromSort = false) {
   const etNow = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
   const etHour = etNow.getHours() + etNow.getMinutes()/60;
   const extLabel = etHour < 9.5 ? 'PRE' : 'AH';
+  const isRegularSession = etHour >= 9.5 && etHour < 16;
 
   document.getElementById('tickerList').innerHTML = tickers.map((t, i) => {
     const chgCls = t.chg > 0 ? 'chg-up' : t.chg < 0 ? 'chg-down' : 'chg-flat';
@@ -2045,11 +2046,11 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">
         <div>$${t.price.toFixed(2)}</div>
-        ${t.ethPrice ? `<div class="tr-eth tr-eth-flat">${extLabel} $${t.ethPrice.toFixed(2)}</div>` : ''}
+        ${t.ethPrice && !isRegularSession ? `<div class="tr-eth tr-eth-flat">${extLabel} $${t.ethPrice.toFixed(2)}</div>` : ''}
       </div>
       <div class="tr-chg ${chgCls}">
         <div>${chgPfx}${t.chg.toFixed(2)}%</div>
-        ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
+        ${t.ethChg != null && !isRegularSession ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
       </div>
       <div class="tr-vol" id="vol-${t.ticker}">${fmtVol(t.vol)}</div>
       <div class="tr-float" id="float-${t.ticker}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
@@ -2451,13 +2452,18 @@ async function runFloatEnrich() {
             const m = parseInt(new Intl.DateTimeFormat('en-US',{minute:'numeric',timeZone:'America/New_York'}).format(now));
             return (h * 60 + m) < 570 ? 'PRE' : 'AH';
           })();
+          const isRegular = (() => {
+            const now = new Date();
+            const h = parseFloat(new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit',hour12:false,timeZone:'America/New_York'}).format(now).replace(':','.'));
+            return h >= 9.5 && h < 16;
+          })();
           // Ricostruisce intera cella prezzo — evita duplicati
           const priceCell = row.querySelector('.tr-price');
           if (priceCell) {
             const px = livePrice != null ? livePrice : md.price;
             const eth = md.ethPrice;
             const ethCls = eth && md.ethChg != null ? (md.ethChg > 0 ? 'tr-eth-up' : md.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat') : 'tr-eth-flat';
-            priceCell.innerHTML = `<div>$${px.toFixed(2)}</div>${eth ? `<div class="tr-eth ${ethCls}">${extLbl} $${eth.toFixed(2)}</div>` : ''}`;
+            priceCell.innerHTML = `<div>$${px.toFixed(2)}</div>${eth && !isRegular ? `<div class="tr-eth ${ethCls}">${extLbl} $${eth.toFixed(2)}</div>` : ''}`;
           }
           // Ricostruisce intera cella chg% — evita duplicati
           if (liveChg != null) {
