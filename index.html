@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Market Intel v6.16</title>
+<title>Market Intel v4</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
 
@@ -1306,9 +1306,9 @@ function bzStateToBzSession(state) {
 
 function updateClock() {
   const now = new Date();
-  const etTime = now.toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const etDate = now.toLocaleDateString('en-US',{timeZone:'America/New_York',day:'2-digit',month:'2-digit'});
-  document.getElementById('clock').textContent = `ET ${etTime} · ${etDate}`;
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('it-IT',{hour12:false}) + ' · ' +
+    now.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'});
 
   const et  = getMarketTime('America/New_York');
   const wd  = et.day >= 1 && et.day <= 5;
@@ -1404,7 +1404,7 @@ function toggleRvol(el) {
 }
 
 /* ══════════════════════════════════
-   SCREENER — v6.16 BENZINGA PRIMARY
+   SCREENER — v6.0 YAHOO PRIMARY
 ══════════════════════════════════ */
 
 // Yahoo screener IDs da provare in ordine
@@ -1783,53 +1783,32 @@ async function runPreScan() {
   }
 }
 
-
 async function fetchFhNews(ticker, fhKey) {
-  // Finnhub company-news — buona copertura small cap
   const today = new Date();
   const to   = today.toISOString().split('T')[0];
   const from = new Date(today - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   try {
-    const url = `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${fhKey}`;
+    const url = 'https://finnhub.io/api/v1/company-news?symbol=' + ticker + '&from=' + from + '&to=' + to + '&token=' + fhKey;
     const r = await fetchWithTimeout(url, 8000);
     if (!r.ok) return [];
     const data = await r.json();
     if (!Array.isArray(data)) return [];
-    const todayTs = new Date(to).getTime() / 1000;
-    const yesterTs = new Date(from).getTime() / 1000;
-    // Filtra ChartMill e articoli generici — tieni solo news specifiche
+    const todayStr = to;
     return data
-      .filter(n => n.source !== 'ChartMill')
-      .map(n => ({ ...n, isToday: n.datetime >= yesterTs + 86400 }))
+      .filter(function(n) { return n.source !== 'ChartMill'; })
+      .map(function(n) {
+        const d = new Date(n.datetime * 1000).toISOString().split('T')[0];
+        return Object.assign({}, n, { isToday: d === todayStr });
+      })
       .slice(0, 5);
   } catch(e) { return []; }
-}
-
-async function runAutoNews(indices) {
-  const fhKey = getFhKey();
-  if (!fhKey || !indices.length) return;
-
-  for (let i = 0; i < indices.length; i++) {
-    const idx = indices[i];
-    const t = masterData[idx];
-    if (!t || t._fhNews !== undefined) continue;
-
-    const news = await fetchFhNews(t.ticker, fhKey);
-    t._fhNews = news;
-
-    // Aggiorna catalyst cell se box aperto
-    const cell = document.getElementById('catalyst-cell-' + t.ticker);
-    if (cell) updateCatalystCell(cell, news);
-
-    if (i < indices.length - 1) await sleep(300);
-  }
 }
 
 function updateCatalystCell(cell, news) {
   if (news.length > 0) {
     const title = news[0].headline || '';
-    const short = title.length > 35 ? title.substring(0,35)+'…' : title;
-    const hasToday = news.some(n => n.isToday);
+    const short = title.length > 35 ? title.substring(0, 35) + '…' : title;
+    const hasToday = news.some(function(n) { return n.isToday; });
     const color = hasToday ? 'var(--green)' : 'var(--amber)';
     const label = hasToday ? 'oggi' : 'ieri';
     cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
@@ -1837,6 +1816,21 @@ function updateCatalystCell(cell, news) {
       '<div class="pgc-sub" style="color:' + color + ';font-size:7px">' + label + ': ' + short + '</div>';
   } else {
     cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
+  }
+}
+
+async function runAutoNews(indices) {
+  const fhKey = getFhKey();
+  if (!fhKey || !indices.length) return;
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    const t = masterData[idx];
+    if (!t || t._fhNews !== undefined) continue;
+    const news = await fetchFhNews(t.ticker, fhKey);
+    t._fhNews = news;
+    const cell = document.getElementById('catalyst-cell-' + t.ticker);
+    if (cell) updateCatalystCell(cell, news);
+    if (i < indices.length - 1) await sleep(300);
   }
 }
 
@@ -2051,8 +2045,8 @@ function calcPrelimRoss(t) {
   return divisor > 0 ? Math.round(score / divisor) : 0;
 }
 
-function updatePrelimRossCell(ticker, t) {
-  const cell = document.getElementById(`ross-${ticker}`);
+function updatePrelimRossCell(idx, t) {
+  const cell = document.getElementById(`ross${idx}`);
   if (!cell) return;
   // Non sovrascrivere se c'è già un'analisi Ross reale
   if (t._analysis?.rossScore) return;
@@ -2086,7 +2080,6 @@ function renderTickers(tickers, fromSort = false) {
   const etNow = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
   const etHour = etNow.getHours() + etNow.getMinutes()/60;
   const extLabel = etHour < 9.5 ? 'PRE' : 'AH';
-  const isRegularSession = etHour >= 9.5 && etHour < 16;
 
   document.getElementById('tickerList').innerHTML = tickers.map((t, i) => {
     const chgCls = t.chg > 0 ? 'chg-up' : t.chg < 0 ? 'chg-down' : 'chg-flat';
@@ -2104,23 +2097,23 @@ function renderTickers(tickers, fromSort = false) {
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
     const si = t._scanIdx ?? i; // indice reale in scanData
     const outOfScanStyle = t._outOfScan ? 'opacity:.65;border-left:2px solid var(--amber)' : '';
-    return `<div class="ticker-row" id="tr-${t.ticker}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
+    return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
       <div class="tr-check" onclick="event.stopPropagation()">
-        ${needsEnrich ? `<input type="checkbox" id="chk-${t.ticker}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
+        ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">
         <div>$${t.price.toFixed(2)}</div>
-        ${t.ethPrice && !isRegularSession ? `<div class="tr-eth tr-eth-flat">${extLabel} $${t.ethPrice.toFixed(2)}</div>` : ''}
+        ${t.ethPrice ? `<div class="tr-eth tr-eth-flat">${extLabel} $${t.ethPrice.toFixed(2)}</div>` : ''}
       </div>
       <div class="tr-chg ${chgCls}">
         <div>${chgPfx}${t.chg.toFixed(2)}%</div>
-        ${t.ethChg != null && !isRegularSession ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
+        ${t.ethChg != null ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
       </div>
-      <div class="tr-vol" id="vol-${t.ticker}">${fmtVol(t.vol)}</div>
-      <div class="tr-float" id="float-${t.ticker}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
-      <div class="tr-rvol ${rvolCls}" id="rvol-${t.ticker}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
-      <div class="tr-ross" id="ross-${t.ticker}">${(() => {
+      <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
+      <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
+      <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
+      <div class="tr-ross" id="ross${si}">${(() => {
         if (t._analysis?.rossScore) {
           const s = t._analysis.rossScore;
           const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
@@ -2132,7 +2125,7 @@ function renderTickers(tickers, fromSort = false) {
         }
         return '--';
       })()}</div>
-      <div class="tr-name" id="name-${t.ticker}" title="${t.name}">
+      <div class="tr-name" id="name${si}" title="${t.name}">
         ${t.source === 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : t._fromMostActive && !t._fromGainers ? '<span class="wf-badge wf-fmp-active">ACTIVE</span>' : '<span class="wf-badge wf-fmp">FMP</span>'}
         ${t._bzEnriched && t.source !== 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : ''}
         ${t._analysis ? '<span class="wf-badge wf-ross">★ ROSS</span>' : ''}
@@ -2147,19 +2140,12 @@ function renderTickers(tickers, fromSort = false) {
    CHECKBOX + FLOAT ENRICH
 ══════════════════════════════════ */
 function getCheckedIndices() {
-  // Restituisce indici in scanData (lista visibile) — stabile per Ross e Enrich
+  // Restituisce indici numerici cercando per ticker symbol in scanData
   return [...document.querySelectorAll('[id^="chk"]:checked')]
     .map(cb => cb.dataset.ticker)
     .filter(Boolean)
-    .map(sym => scanData.findIndex(t => t.ticker === sym))
+    .map(sym => masterData.findIndex(t => t.ticker === sym))
     .filter(i => i >= 0);
-}
-
-function getCheckedTickers() {
-  // Restituisce ticker symbols direttamente — usato dove serve il ticker non l'indice
-  return [...document.querySelectorAll('[id^="chk"]:checked')]
-    .map(cb => cb.dataset.ticker)
-    .filter(Boolean);
 }
 
 function updateFloatBtn() {
@@ -2269,7 +2255,7 @@ async function runAutoEnrich(indices) {
     const t = masterData[idx];
     if (!t) return;
     const bz = bzData[t.ticker] || {};
-    const ticker = t.ticker;
+    const domIdx = t._scanIdx ?? idx;
 
     if (bz.float  != null) masterData[idx].float    = bz.float;
     if (bz.vol    != null) masterData[idx].vol      = bz.vol;
@@ -2297,22 +2283,22 @@ async function runAutoEnrich(indices) {
     sessionCache[t.ticker].rvol   = masterData[idx].rvol;
 
     // Aggiorna DOM
-    const floatCell = document.getElementById(`float-${ticker}`);
+    const floatCell = document.getElementById(`float${domIdx}`);
     if (floatCell && bz.float) {
       const isMicro = bz.float < 10e6;
       floatCell.style.color      = isMicro ? 'var(--green)' : '';
       floatCell.style.fontWeight = isMicro ? 'bold' : '';
       floatCell.textContent      = fmtVol(bz.float);
     }
-    const volCell = document.getElementById(`vol-${ticker}`);
+    const volCell = document.getElementById(`vol${domIdx}`);
     if (volCell && bz.vol) volCell.textContent = fmtVol(bz.vol);
-    const rvolCell = document.getElementById(`rvol-${ticker}`);
+    const rvolCell = document.getElementById(`rvol${domIdx}`);
     if (rvolCell && masterData[idx].rvol) {
       const rv = masterData[idx].rvol;
       rvolCell.textContent = rv.toFixed(1) + 'x';
       rvolCell.className = 'tr-rvol ' + (rv >= 3 ? 'rvol-hi' : 'rvol-mid');
     }
-    updatePrelimRossCell(ticker, masterData[idx]);
+    updatePrelimRossCell(domIdx, masterData[idx]);
 
     // Badge BZ aggiornato dopo re-render
   });
@@ -2324,10 +2310,8 @@ async function runAutoEnrich(indices) {
 
   if (btn) { btn.disabled = false; btn.textContent = '▶ SCAN ORA'; }
 
-  // Avvia fetch news Finnhub in background
   runAutoNews(indices);
 }
-
 
 /* ══════════════════════════════════
    ENRICH (BENZINGA PRIMARY · FMP FALLBACK)
@@ -2422,7 +2406,7 @@ async function runFloatEnrich() {
     const idx = indices[i];
     const t   = masterData[idx];
     if (!t) continue;
-    const ticker = t.ticker;
+    const domIdx = t._scanIdx ?? idx;
 
     btn.innerHTML = `⏳ ${i+1}/${symbols.length}`;
 
@@ -2436,9 +2420,9 @@ async function runFloatEnrich() {
       let liveChg  = bz.chg      != null ? bz.chg      : null;
       let rvol     = null;
 
-      // ── FMP fallback — solo se float ancora mancante dopo Benzinga ──
+      // ── FMP fallback — solo se Benzinga non configurata o non ha risposto ──
       const bzHasData = bzKey && Object.keys(bzData).length > 0;
-      if (fmpKey && (!bzHasData || !float)) {
+      if (fmpKey && !bzHasData) {
         try {
           const calls = [
             !vol   ? fetchWithTimeout(`${NETLIFY_PROXY}?mode=fmp&endpoint=profile&symbol=${t.ticker}&apikey=${fmpKey}`, 10000) : Promise.resolve(null),
@@ -2492,7 +2476,7 @@ async function runFloatEnrich() {
 
       // ── Aggiorna DOM ──
       if (float) {
-        const floatCell = document.getElementById(`float-${ticker}`);
+        const floatCell = document.getElementById(`float${domIdx}`);
         if (floatCell) {
           const isMicro = float < 10e6;
           floatCell.style.color      = isMicro ? 'var(--green)' : '';
@@ -2501,11 +2485,11 @@ async function runFloatEnrich() {
         }
       }
       if (vol) {
-        const volCell = document.getElementById(`vol-${ticker}`);
+        const volCell = document.getElementById(`vol${domIdx}`);
         if (volCell) volCell.textContent = fmtVol(vol);
       }
       if (rvol) {
-        const rvolCell = document.getElementById(`rvol-${ticker}`);
+        const rvolCell = document.getElementById(`rvol${domIdx}`);
         if (rvolCell) {
           rvolCell.textContent = rvol.toFixed(1) + 'x';
           rvolCell.className = 'tr-rvol ' + (rvol >= 3 ? 'rvol-hi' : 'rvol-mid');
@@ -2514,41 +2498,21 @@ async function runFloatEnrich() {
       if (liveChg != null || livePrice != null) {
         const row = document.querySelector(`[data-ticker="${t.ticker}"]`);
         if (row) {
-          const md = masterData[idx];
-          const extLbl = (() => {
-            const now = new Date();
-            const h = parseInt(new Intl.DateTimeFormat('en-US',{hour:'numeric',hour12:false,timeZone:'America/New_York'}).format(now));
-            const m = parseInt(new Intl.DateTimeFormat('en-US',{minute:'numeric',timeZone:'America/New_York'}).format(now));
-            return (h * 60 + m) < 570 ? 'PRE' : 'AH';
-          })();
-          const isRegular = (() => {
-            const now = new Date();
-            const h = parseFloat(new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit',hour12:false,timeZone:'America/New_York'}).format(now).replace(':','.'));
-            return h >= 9.5 && h < 16;
-          })();
-          // Ricostruisce intera cella prezzo — evita duplicati
-          const priceCell = row.querySelector('.tr-price');
-          if (priceCell) {
-            const px = livePrice != null ? livePrice : md.price;
-            const eth = md.ethPrice;
-            const ethCls = eth && md.ethChg != null ? (md.ethChg > 0 ? 'tr-eth-up' : md.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat') : 'tr-eth-flat';
-            priceCell.innerHTML = `<div>$${px.toFixed(2)}</div>${eth && !isRegular ? `<div class="tr-eth ${ethCls}">${extLbl} $${eth.toFixed(2)}</div>` : ''}`;
+          if (livePrice != null) {
+            const priceCell = row.querySelector('.tr-price');
+            if (priceCell) priceCell.firstChild.textContent = `$${livePrice.toFixed(2)}`;
           }
-          // Ricostruisce intera cella chg% — evita duplicati
           if (liveChg != null) {
             const chgCell = row.querySelector('.tr-chg');
             if (chgCell) {
               const pfx = liveChg >= 0 ? '+' : '';
-              const ethChg = md.ethChg;
-              const ethChgCls = ethChg != null ? (ethChg > 0 ? 'tr-eth-up' : ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat') : 'tr-eth-flat';
-              const ethChgStr = ethChg != null ? `${ethChg > 0 ? '+' : ''}${ethChg.toFixed(2)}%` : '';
+              chgCell.textContent = `${pfx}${liveChg.toFixed(2)}%`;
               chgCell.className = 'tr-chg ' + (liveChg > 0 ? 'chg-up' : liveChg < 0 ? 'chg-dn' : '');
-              chgCell.innerHTML = `<div>${pfx}${liveChg.toFixed(2)}%</div>${ethChg != null ? `<div class="tr-eth ${ethChgCls}">${extLbl} ${ethChgStr}</div>` : ''}`;
             }
           }
         }
       }
-      updatePrelimRossCell(ticker, masterData[idx]);
+      updatePrelimRossCell(domIdx, masterData[idx]);
       if (float || vol) updated++;
     } catch(e) { /* skip */ }
   }
@@ -2558,7 +2522,7 @@ async function runFloatEnrich() {
   btn.disabled = false;
   btn.style.display = 'inline-block'; // sempre visibile dopo enrich
   // Deseleziona tutti i checkbox
-  document.querySelectorAll('[id^="chk-"]').forEach(cb => cb.checked = false);
+  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
   showToast(`✓ Enrich completato per ${updated}/${indices.length} ticker`);
@@ -2682,7 +2646,8 @@ function showPrelimDetail(t) {
         </div>
         <div class="pg-cell" id="catalyst-cell-${t.ticker}">
           <div class="pgc-name">CATAL.</div>
-          ${t._fhNews && t._fhNews.length > 0 ? `<div class="pgc-val" style="color:${t._fhNews.some(n=>n.isToday)?'var(--green)':\'var(--amber)\'}">&#x26a1;</div><div class="pgc-sub" style="color:${t._fhNews.some(n=>n.isToday)?'var(--green)':\'var(--amber)\'}; font-size:7px">${t._fhNews.some(n=>n.isToday)?'oggi':'ieri'}: ${(t._fhNews[0].headline||'').substring(0,35)}${t._fhNews[0].headline?.length>35?'\u2026':''}</div>` : `<div class="pgc-val pv-na">?</div><div class="pgc-sub">${t._fhNews === undefined ? 'carico...' : 'nessuna news'}</div>`}
+          <div class="pgc-val pv-na">?</div>
+          <div class="pgc-sub">carico...</div>
         </div>
         <div class="pg-cell">
           <div class="pgc-name">PRICE</div>
@@ -2713,22 +2678,20 @@ function showPrelimDetail(t) {
       </div>
     </div>`;
 
-
-
-
-  // Se news non ancora caricate — fetcha on-demand
   if (t._fhNews === undefined) {
-    const fhKey = getFhKey();
+    var fhKey = getFhKey();
     if (fhKey) {
-      fetchFhNews(t.ticker, fhKey).then(news => {
+      fetchFhNews(t.ticker, fhKey).then(function(news) {
         t._fhNews = news;
-        const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
+        var mdIdx = masterData.findIndex(function(x) { return x.ticker === t.ticker; });
         if (mdIdx >= 0) masterData[mdIdx]._fhNews = news;
-        const cell = document.getElementById('catalyst-cell-' + t.ticker);
+        var cell = document.getElementById('catalyst-cell-' + t.ticker);
         if (cell) updateCatalystCell(cell, news);
       });
     }
   }
+}
+
 function showRossDetail(t) {
   const rep = t._analysis;
   const pOrder  = ['float','catalyst','price','volume','setup'];
@@ -2859,14 +2822,14 @@ function sortTable(col) {
 
   // Dopo il re-render, ripristina i punteggi Ross già calcolati
   scanData.forEach((t, i) => {
-    const cell = document.getElementById(`ross-${scanData[i]?.ticker || i}`);
+    const cell = document.getElementById(`ross${i}`);
     if (!cell) return;
     if (t._analysis) {
       const score = t._analysis.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       cell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
       // Ripristina colore bordo riga
-      const row = document.getElementById(`tr-${scanData[i]?.ticker || i}`);
+      const row = document.getElementById(`tr${i}`);
       if (row) row.style.borderLeft = score >= 7 ? '2px solid var(--green)' : score >= 4 ? '2px solid var(--amber)' : '';
     }
   });
@@ -2877,7 +2840,7 @@ function sortTable(col) {
 ══════════════════════════════════ */
 let rossPage     = 0;
 let rossScanning = false;
-const ROSS_PAGE_SIZE = 5;
+const ROSS_PAGE_SIZE = 2;
 
 // Scan Ross solo sui ticker selezionati con checkbox
 async function runRossSelected() {
@@ -2901,7 +2864,7 @@ async function runRossSelected() {
     document.getElementById('rossProgress').textContent =
       `🎯 Analisi ${i + 1}/${indices.length} — ${t.ticker}...`;
 
-    const rossCell = document.getElementById(`ross-${t.ticker}`);
+    const rossCell = document.getElementById(`ross${idx}`);
     if (rossCell) rossCell.innerHTML = '<span style="color:var(--muted2)">...</span>';
 
     try {
@@ -2909,19 +2872,17 @@ async function runRossSelected() {
       const score = rep.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       scanData[idx]._analysis = rep;
-      // Aggiorna masterData per ticker — stabile indipendentemente da sort/filter
-      const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
-      if (mdIdx >= 0) masterData[mdIdx]._analysis = rep;
+      masterData[scanData[idx]._scanIdx ?? idx]._analysis = rep;
       // Salva nel sessionCache
       if (!sessionCache[t.ticker]) sessionCache[t.ticker] = {};
       sessionCache[t.ticker]._analysis = rep;
       if (rossCell) rossCell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
 
-      const row = document.getElementById(`tr-${t.ticker}`);
+      const row = document.getElementById(`tr${i}`);
       if (row && score >= 7) row.style.borderLeft = '2px solid var(--green)';
 
       // Aggiungi badge ★ ROSS nella colonna nome
-      const nameCell2 = document.getElementById(`name-${t.ticker}`);
+      const nameCell2 = document.getElementById(`name${i}`);
       if (nameCell2 && !nameCell2.querySelector('.wf-ross')) {
         const rb = document.createElement('span');
         rb.className = 'wf-badge wf-ross';
@@ -2931,13 +2892,7 @@ async function runRossSelected() {
         if (bzBadge) bzBadge.after(rb);
         else nameCell2.insertBefore(rb, nameCell2.firstChild);
       }
-    } catch(e) {
-      console.warn('Ross error', t.ticker, e);
-      const rossCell2 = document.getElementById(`ross-${t.ticker}`);
-      if (rossCell2) rossCell2.innerHTML = '<span style="color:var(--red);font-size:9px">ERR</span>';
-      document.getElementById('rossProgress').textContent = `⚠ Errore ${t.ticker}: ${e.message?.substring(0,40) || 'timeout'}`;
-      await sleep(1000);
-    }
+    } catch(e) { console.warn('Ross error', t.ticker, e); }
 
     if (i < indices.length - 1) await sleep(800);
   }
@@ -2946,7 +2901,7 @@ async function runRossSelected() {
   btn.disabled = false;
   document.getElementById('rossProgress').textContent = `✓ ${indices.length} ticker analizzati`;
 
-  document.querySelectorAll('[id^="chk-"]').forEach(cb => cb.checked = false);
+  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
   updateFloatBtn();
@@ -2985,11 +2940,11 @@ async function runRossScan() {
     // Trova la riga per ticker (stabile anche dopo sort)
     function getRossCell(ticker) {
       const idx = scanData.findIndex(x => x.ticker === ticker);
-      const tk = scanData[idx]?.ticker; return tk ? document.getElementById(`ross-${tk}`) : null;
+      return idx >= 0 ? document.getElementById(`ross${idx}`) : null;
     }
     function getTickerRow(ticker) {
       const idx = scanData.findIndex(x => x.ticker === ticker);
-      const tk2 = scanData[idx]?.ticker; return tk2 ? document.getElementById(`tr-${tk2}`) : null;
+      return idx >= 0 ? document.getElementById(`tr${idx}`) : null;
     }
 
     const rossCell = getRossCell(t.ticker);
@@ -3145,11 +3100,13 @@ async function analyzeTickerIdx(idx) {
 }
 
 async function callClaude(ticker, apiKey) {
-  const fhNewsContext = ticker._fhNews && ticker._fhNews.length > 0
-    ? '\nNOTIZIE RECENTI (Finnhub):\n' +
-      ticker._fhNews.map(n => '- [' + (n.isToday ? 'OGGI' : 'IERI') + '] ' + n.headline + ' (' + n.source + ')').join('\n')
-    : '';
-
+  var fhNewsContext = '';
+  if (ticker._fhNews && ticker._fhNews.length > 0) {
+    fhNewsContext = '\nNOTIZIE RECENTI (Finnhub):\n' +
+      ticker._fhNews.map(function(n) {
+        return '- [' + (n.isToday ? 'OGGI' : 'IERI') + '] ' + n.headline + ' (' + n.source + ')';
+      }).join('\n');
+  }
   const prompt = `Trader esperto, metodo Ross Cameron 5 Pillars momentum trading.
 
 TICKER DA ANALIZZARE: ${ticker.ticker}
@@ -3236,7 +3193,7 @@ function renderAnalysis(rep, elapsed) {
     // Salva nel sessionCache
     if (!sessionCache[rep.ticker || currentTicker]) sessionCache[rep.ticker || currentTicker] = {};
     sessionCache[rep.ticker || currentTicker]._analysis = rep;
-    const rossCell = document.getElementById(`ross-${masterData[idx]?.ticker || idx}`);
+    const rossCell = document.getElementById(`ross${idx}`);
     if (rossCell && rep.rossScore) {
       const s = rep.rossScore;
       const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
