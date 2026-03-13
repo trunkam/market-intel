@@ -923,6 +923,8 @@ body {
       <input class="sp-input" id="fmpKey2Input" placeholder="la tua FMP key di backup..." />
       <div class="sp-label" style="margin-top:12px">Benzinga API Key <span style="color:var(--muted3);font-size:9px">(fonte primaria — float · avgVol · volume · prezzo live)</span></div>
       <input class="sp-input" id="bzKeyInput" placeholder="la tua Benzinga key..." />
+      <div class="sp-label" style="margin-top:12px">Finnhub API Key <span style="color:var(--muted3);font-size:9px">(catalyst news — small cap coverage)</span></div>
+      <input class="sp-input" id="fhKeyInput" placeholder="la tua Finnhub key..." />
       <div class="sp-status" id="fmpStatus2">Opzionale — si attiva automaticamente quando la key principale è esaurita</div>
     </div>
     <hr class="sp-divider">
@@ -1075,6 +1077,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
   const bz = localStorage.getItem('mi_bzkey');
   if (bz) document.getElementById('bzKeyInput').value = bz;
+  const fh = localStorage.getItem('mi_fhkey');
+  if (fh && document.getElementById('fhKeyInput')) document.getElementById('fhKeyInput').value = fh;
   updateKeyStatus();
   updateFmpDisplay();
   checkPremarketWarning();
@@ -1099,6 +1103,9 @@ function saveSettings() {
   const bz2  = document.getElementById('bzKeyInput')?.value?.trim();
   if (bz2) localStorage.setItem('mi_bzkey', bz2);
   else localStorage.removeItem('mi_bzkey');
+  const fh2 = document.getElementById('fhKeyInput')?.value?.trim();
+  if (fh2) localStorage.setItem('mi_fhkey', fh2);
+  else localStorage.removeItem('mi_fhkey');
   if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
   else localStorage.removeItem('mi_fmpkey2');
   updateKeyStatus();
@@ -1107,6 +1114,7 @@ function saveSettings() {
 
 // Restituisce la key FMP attiva — usa key2 automaticamente se fmpCount >= 200
 function getBzKey()   { return localStorage.getItem('mi_bzkey')  || document.getElementById('bzKeyInput')?.value?.trim() || ''; }
+function getFhKey()   { return localStorage.getItem('mi_fhkey')  || document.getElementById('fhKeyInput')?.value?.trim() || ''; }
 function getFmpKey() {
   const count = parseInt(localStorage.getItem('mi_fmpcount') || '0', 10);
   const key2  = localStorage.getItem('mi_fmpkey2') || document.getElementById('fmpKey2Input')?.value?.trim() || '';
@@ -1775,26 +1783,61 @@ async function runPreScan() {
   }
 }
 
-async function fetchBzNews(ticker) {
-  const bzKey = getBzKey();
-  if (!bzKey) return [];
+
+async function fetchFhNews(ticker, fhKey) {
+  // Finnhub company-news — buona copertura small cap
+  const today = new Date();
+  const to   = today.toISOString().split('T')[0];
+  const from = new Date(today - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   try {
-    const today = new Date();
-    const from  = new Date(today - 2 * 24 * 60 * 60 * 1000); // ultimi 2 giorni
-    const dateFrom = from.toISOString().split('T')[0];
-    const url = `https://api.benzinga.com/api/v2/news?tickers=${ticker}&dateFrom=${dateFrom}&displayOutput=headline&pageSize=5&sort=created:desc&token=${bzKey}`;
-    const r = await fetchWithTimeout(url, 8000, { headers: { 'accept': 'application/json' } });
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${fhKey}`;
+    const r = await fetchWithTimeout(url, 8000);
     if (!r.ok) return [];
     const data = await r.json();
     if (!Array.isArray(data)) return [];
-    // Aggiungi flag isToday per contestualizzare
-    const todayStr = today.toISOString().split('T')[0];
-    return data.map(n => ({
-      ...n,
-      isToday: n.created ? n.created.includes(todayStr) || 
-        new Date(n.created).toISOString().split('T')[0] === todayStr : false
-    }));
+    const todayTs = new Date(to).getTime() / 1000;
+    const yesterTs = new Date(from).getTime() / 1000;
+    // Filtra ChartMill e articoli generici — tieni solo news specifiche
+    return data
+      .filter(n => n.source !== 'ChartMill')
+      .map(n => ({ ...n, isToday: n.datetime >= yesterTs + 86400 }))
+      .slice(0, 5);
   } catch(e) { return []; }
+}
+
+async function runAutoNews(indices) {
+  const fhKey = getFhKey();
+  if (!fhKey || !indices.length) return;
+
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    const t = masterData[idx];
+    if (!t || t._fhNews !== undefined) continue;
+
+    const news = await fetchFhNews(t.ticker, fhKey);
+    t._fhNews = news;
+
+    // Aggiorna catalyst cell se box aperto
+    const cell = document.getElementById('catalyst-cell-' + t.ticker);
+    if (cell) updateCatalystCell(cell, news);
+
+    if (i < indices.length - 1) await sleep(300);
+  }
+}
+
+function updateCatalystCell(cell, news) {
+  if (news.length > 0) {
+    const title = news[0].headline || '';
+    const short = title.length > 35 ? title.substring(0,35)+'…' : title;
+    const hasToday = news.some(n => n.isToday);
+    const color = hasToday ? 'var(--green)' : 'var(--amber)';
+    const label = hasToday ? 'oggi' : 'ieri';
+    cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
+      '<div class="pgc-val" style="color:' + color + '">⚡</div>' +
+      '<div class="pgc-sub" style="color:' + color + ';font-size:7px">' + label + ': ' + short + '</div>';
+  } else {
+    cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
+  }
 }
 
 async function fetchFmpGainers() {
@@ -2281,74 +2324,10 @@ async function runAutoEnrich(indices) {
 
   if (btn) { btn.disabled = false; btn.textContent = '▶ SCAN ORA'; }
 
-  // Avvia fetch news in background — sequenziale con delay
+  // Avvia fetch news Finnhub in background
   runAutoNews(indices);
 }
 
-async function runAutoNews(indices) {
-  const bzKey = getBzKey();
-  if (!bzKey || !indices.length) return;
-
-  // Filtra solo ticker senza news già caricate
-  const tickers = indices
-    .map(i => masterData[i])
-    .filter(t => t && t._bzNews === undefined)
-    .map(t => t.ticker);
-
-  if (!tickers.length) return;
-
-  try {
-    const today = new Date();
-    const from  = new Date(today - 2 * 24 * 60 * 60 * 1000);
-    const dateFrom = from.toISOString().split('T')[0];
-    const todayStr = today.toISOString().split('T')[0];
-
-    // Una sola chiamata batch con tutti i ticker
-    const url = `https://api.benzinga.com/api/v2/news?tickers=${tickers.join(',')}&dateFrom=${dateFrom}&displayOutput=headline&pageSize=50&sort=created:desc&token=${bzKey}`;
-    const r = await fetchWithTimeout(url, 10000, { headers: { 'accept': 'application/json' } });
-    if (!r.ok) return;
-    const data = await r.json();
-    if (!Array.isArray(data)) return;
-
-    // Raggruppa news per ticker
-    const newsByTicker = {};
-    tickers.forEach(tk => { newsByTicker[tk] = []; });
-    data.forEach(n => {
-      const isToday = n.created ?
-        new Date(n.created).toISOString().split('T')[0] === todayStr : false;
-      const item = { ...n, isToday };
-      (n.stocks || []).forEach(s => {
-        if (newsByTicker[s.name] !== undefined) {
-          newsByTicker[s.name].push(item);
-        }
-      });
-    });
-
-    // Aggiorna masterData e DOM per ogni ticker
-    tickers.forEach(tk => {
-      const news = newsByTicker[tk] || [];
-      const mdIdx = masterData.findIndex(x => x.ticker === tk);
-      if (mdIdx >= 0) masterData[mdIdx]._bzNews = news;
-
-      // Aggiorna pillar catalyst nel DOM se il box è aperto su questo ticker
-      const cell = document.getElementById('catalyst-cell-' + tk);
-      if (cell) {
-        if (news.length > 0) {
-          const title = news[0].title || '';
-          const short = title.length > 35 ? title.substring(0,35)+'…' : title;
-          const hasToday = news.some(n => n.isToday);
-          const color = hasToday ? 'var(--green)' : 'var(--amber)';
-          const label = hasToday ? 'oggi' : 'ieri';
-          cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
-            '<div class="pgc-val" style="color:' + color + '">⚡</div>' +
-            '<div class="pgc-sub" style="color:' + color + ';font-size:7px">' + label + ': ' + short + '</div>';
-        } else {
-          cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
-        }
-      }
-    });
-  } catch(e) { console.warn('AutoNews error:', e); }
-}
 
 /* ══════════════════════════════════
    ENRICH (BENZINGA PRIMARY · FMP FALLBACK)
@@ -2694,7 +2673,7 @@ function showPrelimDetail(t) {
 
   analysisScroll.innerHTML = `
     <div style="padding:12px 14px">
-      <div style="color:var(--amber);font-size:9px;letter-spacing:1px;margin-bottom:10px">⚡ STIMA PRELIMINARE — Catalyst da Benzinga</div>
+      <div style="color:var(--amber);font-size:9px;letter-spacing:1px;margin-bottom:10px">⚡ STIMA PRELIMINARE — manca Catalyst (Claude)</div>
       <div class="pillars-grid">
         <div class="pg-cell">
           <div class="pgc-name">FLOAT</div>
@@ -2703,8 +2682,7 @@ function showPrelimDetail(t) {
         </div>
         <div class="pg-cell" id="catalyst-cell-${t.ticker}">
           <div class="pgc-name">CATAL.</div>
-          <div class="pgc-val pv-na">?</div>
-          <div class="pgc-sub">carico...</div>
+          ${t._fhNews && t._fhNews.length > 0 ? `<div class="pgc-val" style="color:${t._fhNews.some(n=>n.isToday)?'var(--green)':\'var(--amber)\'}">&#x26a1;</div><div class="pgc-sub" style="color:${t._fhNews.some(n=>n.isToday)?'var(--green)':\'var(--amber)\'}; font-size:7px">${t._fhNews.some(n=>n.isToday)?'oggi':'ieri'}: ${(t._fhNews[0].headline||'').substring(0,35)}${t._fhNews[0].headline?.length>35?'\u2026':''}</div>` : `<div class="pgc-val pv-na">?</div><div class="pgc-sub">${t._fhNews === undefined ? 'carico...' : 'nessuna news'}</div>`}
         </div>
         <div class="pg-cell">
           <div class="pgc-name">PRICE</div>
@@ -2736,28 +2714,21 @@ function showPrelimDetail(t) {
     </div>`;
 
 
-  // Fetch news Benzinga in background — aggiorna pillar catalyst
-  fetchBzNews(t.ticker).then(news => {
-    const cell = document.getElementById('catalyst-cell-' + t.ticker);
-    if (!cell) return;
-    const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
-    if (mdIdx >= 0) masterData[mdIdx]._bzNews = news;
-    t._bzNews = news;
-    if (news.length > 0) {
-      const title = news[0].title || '';
-      const short = title.length > 35 ? title.substring(0,35)+'\u2026' : title;
-      const hasToday = news.some(n => n.isToday);
-      const color = hasToday ? 'var(--green)' : 'var(--amber)';
-      const label = hasToday ? 'oggi' : 'ieri';
-      cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
-        '<div class="pgc-val" style="color:' + color + '">\u26a1</div>' +
-        '<div class="pgc-sub" style="color:' + color + ';font-size:7px" title="' + title.replace(/"/g,"'") + '">' + label + ': ' + short + '</div>';
-    } else {
-      cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
-    }
-  });
-}
 
+
+  // Se news non ancora caricate — fetcha on-demand
+  if (t._fhNews === undefined) {
+    const fhKey = getFhKey();
+    if (fhKey) {
+      fetchFhNews(t.ticker, fhKey).then(news => {
+        t._fhNews = news;
+        const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
+        if (mdIdx >= 0) masterData[mdIdx]._fhNews = news;
+        const cell = document.getElementById('catalyst-cell-' + t.ticker);
+        if (cell) updateCatalystCell(cell, news);
+      });
+    }
+  }
 function showRossDetail(t) {
   const rep = t._analysis;
   const pOrder  = ['float','catalyst','price','volume','setup'];
@@ -3174,10 +3145,9 @@ async function analyzeTickerIdx(idx) {
 }
 
 async function callClaude(ticker, apiKey) {
-  // Includi news Benzinga se disponibili
-  const bzNewsContext = ticker._bzNews && ticker._bzNews.length > 0
-    ? `\nNOTIZIE BENZINGA (ultime ${ticker._bzNews.length} — priorità: oggi > ieri):\n` +
-      ticker._bzNews.map(n => `- [${n.isToday ? 'OGGI' : 'IERI'}] ${n.title}`).join('\n')
+  const fhNewsContext = ticker._fhNews && ticker._fhNews.length > 0
+    ? '\nNOTIZIE RECENTI (Finnhub):\n' +
+      ticker._fhNews.map(n => '- [' + (n.isToday ? 'OGGI' : 'IERI') + '] ' + n.headline + ' (' + n.source + ')').join('\n')
     : '';
 
   const prompt = `Trader esperto, metodo Ross Cameron 5 Pillars momentum trading.
@@ -3191,7 +3161,7 @@ Dati screener (fonte: Yahoo Finance):
 - Rel. Volume: ${ticker.rvol ? ticker.rvol.toFixed(1)+'x' : 'n/a'}
 - Float / Shares Out: ${ticker.float ? fmtVol(ticker.float) : 'n/a'}
 - Market Cap: ${ticker.mktCap ? '$'+fmtVol(ticker.mktCap) : 'n/a'}
-- Nome: ${ticker.name || 'sconosciuto'}${ticker.prePrice ? `\n- Pre-Market: $${ticker.prePrice.toFixed(2)} (${ticker.preChg > 0?'+':''}${(ticker.preChg||0).toFixed(2)}%)` : ''}${bzNewsContext}
+- Nome: ${ticker.name || 'sconosciuto'}${ticker.prePrice ? `\n- Pre-Market: $${ticker.prePrice.toFixed(2)} (${ticker.preChg > 0?'+':''}${(ticker.preChg||0).toFixed(2)}%)` : ''}${fhNewsContext}
 
 COMPITO:
 1. Cerca notizie e catalyst recenti su ${ticker.ticker} (ultime 24h)
