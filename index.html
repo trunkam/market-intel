@@ -822,6 +822,7 @@ body {
   </div>
   <div class="vsep"></div>
   <button class="scan-btn" id="scanBtn" onclick="runScan()">▶ SCAN ORA</button>
+  <button class="scan-btn" id="preScanBtn" onclick="runPreScan()" style="background:transparent;border:1px solid var(--amber);color:var(--amber)" title="Premarket scan — Benzinga PRE_MARKET movers">⚡ PRE SCAN</button>
   <button class="scan-btn" onclick="clearSessionCache()" title="Svuota storico sessione (float + analisi)" style="background:transparent;border:1px solid var(--border2);color:var(--muted3);font-size:9px;padding:4px 8px">🗑 RESET CACHE</button>
   <button class="scan-btn" id="rossBtn" onclick="runRossScan()" style="display:none;background:transparent;border:1px solid var(--amber);color:var(--amber)">🎯 SCAN ROSS</button>
   <div id="rossProgress" style="display:none;font-size:9px;color:var(--muted3);white-space:nowrap"></div>
@@ -1351,36 +1352,39 @@ async function runScan() {
     <div class="state-box">
       <div class="spin"></div>
       <div class="state-title">SCANSIONE IN CORSO</div>
-      <div class="state-sub" id="scanStatus">Connessione a FMP + Yahoo μ-float...</div>
+      <div class="state-sub" id="scanStatus">Connessione a Benzinga movers...</div>
     </div>`;
 
   const USE_YAHOO_PREDEFINED = false; // disabilita Yahoo predefined
   const USE_YAHOO_MICRO     = false; // disabilita Yahoo micro-float
 
   try {
-    // Screener FMP only
-    const [yahooTickers, microTickers, fmpTickers, fmpActiveTickers] = await Promise.all([
-      Promise.resolve([]),
-      USE_YAHOO_MICRO ? fetchYahooMicro() : Promise.resolve([]),
-      fetchFmpGainers(),
-      fetchFmpMostActive(),
-    ]);
+    // Benzinga REGULAR movers — fonte primaria
+    let bzRegularTickers = await fetchBzMovers('REGULAR', 50);
 
-    fmpTickers.forEach(t => { t.source = 'FMP'; t._fromGainers = true; });
-    fmpActiveTickers.forEach(t => { t.source = 'FMP'; t._fromMostActive = true; });
+    // FMP fallback se Benzinga vuota
+    let fmpTickers = [];
+    let fmpActiveTickers = [];
+    if (!bzRegularTickers.length) {
+      setScanStatus('Benzinga vuota — fallback FMP...');
+      [fmpTickers, fmpActiveTickers] = await Promise.all([
+        fetchFmpGainers(),
+        fetchFmpMostActive(),
+      ]);
+      fmpTickers.forEach(t => { t.source = 'FMP'; t._fromGainers = true; });
+      fmpActiveTickers.forEach(t => { t.source = 'FMP'; t._fromMostActive = true; });
+    }
 
     const seen = new Set();
     const merged = [];
-    // Gainers prima, poi most-active — deduplicati per ticker
-    [...fmpTickers, ...fmpActiveTickers].forEach(t => {
+    [...bzRegularTickers, ...fmpTickers, ...fmpActiveTickers].forEach(t => {
       if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
     });
 
     const parts = [];
-    const gainersOnly  = fmpTickers.length;
-    const activeOnly   = fmpActiveTickers.filter(t => !fmpTickers.find(g => g.ticker === t.ticker)).length;
-    if (gainersOnly)  parts.push(`FMP gainers: ${gainersOnly}`);
-    if (activeOnly)   parts.push(`active: ${activeOnly}`);
+    if (bzRegularTickers.length) parts.push(`BZ: ${bzRegularTickers.length}`);
+    if (fmpTickers.length)       parts.push(`FMP gainers: ${fmpTickers.length}`);
+    if (fmpActiveTickers.length) parts.push(`active: ${fmpActiveTickers.length}`);
     document.getElementById('sourceLabel').textContent = parts.join(' · ');
 
     // Merge con persistenza — ticker con ross>=8 che escono dallo scan vengono mantenuti
@@ -1567,6 +1571,132 @@ async function fetchFmpMostActive() {
       }))
       .filter(t => t.price > 0 && t.chg > 0);
   } catch(e) { return []; }
+}
+
+async function fetchBzMovers(session = 'PRE_MARKET', maxResults = 50) {
+  const bzKey = getBzKey();
+  if (!bzKey) return [];
+  try {
+    setScanStatus(`Recupero Benzinga ${session} movers...`);
+    const url = `https://api.benzinga.com/api/v1/market/movers?session=${session}&maxResults=${maxResults}&token=${bzKey}`;
+    const r = await fetchWithTimeout(url, 12000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    const gainers = data?.result?.gainers || [];
+    return gainers
+      .filter(q => q.symbol && q.price > 0)
+      .map(q => ({
+        ticker:      q.symbol,
+        name:        (q.companyName || '').substring(0, 40),
+        price:       q.price        || 0,
+        chg:         q.changePercent|| 0,
+        vol:         parseInt(q.volume) || null,
+        avgVol:      parseInt(q.averageVolume) || null,
+        float:       parseInt(q.shareFloat)    || null,
+        rvol:        null, // calcolato dopo IQR bars
+        mktCap:      parseInt(q.marketCap)     || null,
+        prevClose:   q.previousClose           || null,
+        prePrice:    null,
+        preChg:      null,
+        preTime:     null,
+        marketState: 'PRE',
+        hasPrePost:  true,
+        source:      'BZ',
+        _fromBzPre:  true,
+      }))
+      .filter(t => t.price > 0 && t.chg > 0);
+  } catch(e) { return []; }
+}
+
+async function runPreScan() {
+  const btn = document.getElementById('preScanBtn');
+  const scanBtn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  scanBtn.disabled = true;
+  document.getElementById('stateBox')?.remove();
+
+  document.getElementById('tickerList').innerHTML = `
+    <div class="state-box">
+      <div class="spin"></div>
+      <div class="state-title">PRE MARKET SCAN</div>
+      <div class="state-sub" id="scanStatus">Recupero Benzinga PRE_MARKET movers...</div>
+    </div>`;
+
+  try {
+    // 1. Benzinga PRE_MARKET movers — fonte primaria
+    let bzTickers = await fetchBzMovers('PRE_MARKET', 50);
+
+    // 2. FMP gainers — fallback o integrazione se Benzinga vuota
+    let fmpTickers = [];
+    if (!bzTickers.length) {
+      setScanStatus('Benzinga vuota — fallback FMP gainers...');
+      fmpTickers = await fetchFmpGainers();
+      fmpTickers.forEach(t => { t.source = 'FMP'; t._fromGainers = true; });
+    }
+
+    const seen = new Set();
+    const merged = [];
+    [...bzTickers, ...fmpTickers].forEach(t => {
+      if (!seen.has(t.ticker)) { seen.add(t.ticker); merged.push(t); }
+    });
+
+    const parts = [];
+    if (bzTickers.length)  parts.push(`BZ pre: ${bzTickers.length}`);
+    if (fmpTickers.length) parts.push(`FMP: ${fmpTickers.length}`);
+    document.getElementById('sourceLabel').textContent = parts.join(' · ');
+
+    // Merge persistenza ross>=8
+    const newTickerSet = new Set(merged.map(t => t.ticker));
+    if (masterData.length > 0) {
+      masterData.forEach(t => {
+        const score = t._analysis?.rossScore || t._prelimRoss || 0;
+        if (score >= 8 && !newTickerSet.has(t.ticker)) {
+          t._outOfScan = true;
+          merged.push(t);
+        }
+      });
+    }
+
+    merged.forEach((t, i) => { t._scanIdx = i; });
+    merged.forEach(t => {
+      t._prelimRoss = calcPrelimRoss(t);
+      const cached = sessionCache[t.ticker];
+      if (cached) {
+        if (cached.float)     t.float     = cached.float;
+        if (cached.vol)       t.vol       = cached.vol;
+        if (cached.avgVol)    t.avgVol    = cached.avgVol;
+        if (cached.rvol)      t.rvol      = cached.rvol;
+        if (cached._analysis) t._analysis = cached._analysis;
+        t._prelimRoss = calcPrelimRoss(t);
+      }
+    });
+
+    masterData = merged;
+    const filtered = applyFilters(merged);
+    scanData = filtered;
+    renderTickers(filtered);
+    document.getElementById('tickerCount').textContent = scanData.length;
+
+    // Auto-enrich con Benzinga se key configurata
+    const bzKeyAuto = getBzKey();
+    if (bzKeyAuto && masterData.length > 0) {
+      setTimeout(async () => {
+        const allIndices = masterData.map((_, i) => i);
+        await runAutoEnrich(allIndices);
+      }, 500);
+    }
+
+  } catch(e) {
+    document.getElementById('tickerList').innerHTML = `
+      <div class="state-box">
+        <div class="state-icon">⚠</div>
+        <div class="state-title">ERRORE PRE SCAN</div>
+        <div class="state-sub">${e.message}</div>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+    scanBtn.disabled = false;
+  }
 }
 
 async function fetchFmpGainers() {
@@ -1861,8 +1991,8 @@ function renderTickers(tickers, fromSort = false) {
         return '--';
       })()}</div>
       <div class="tr-name" id="name${si}" title="${t.name}">
-        ${t._fromMostActive && !t._fromGainers ? '<span class="wf-badge wf-fmp-active">ACTIVE</span>' : '<span class="wf-badge wf-fmp">FMP</span>'}
-        ${t._bzEnriched ? '<span class="wf-badge wf-bz">BZ</span>' : ''}
+        ${t.source === 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : t._fromMostActive && !t._fromGainers ? '<span class="wf-badge wf-fmp-active">ACTIVE</span>' : '<span class="wf-badge wf-fmp">FMP</span>'}
+        ${t._bzEnriched && t.source !== 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : ''}
         ${t._analysis ? '<span class="wf-badge wf-ross">★ ROSS</span>' : ''}
         ${t.name || '--'}
       </div>
