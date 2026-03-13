@@ -923,6 +923,8 @@ body {
       <input class="sp-input" id="fmpKey2Input" placeholder="la tua FMP key di backup..." />
       <div class="sp-label" style="margin-top:12px">Benzinga API Key <span style="color:var(--muted3);font-size:9px">(fonte primaria — float · avgVol · volume · prezzo live)</span></div>
       <input class="sp-input" id="bzKeyInput" placeholder="la tua Benzinga key..." />
+      <div class="sp-label" style="margin-top:12px">Finnhub API Key <span style="color:var(--muted3);font-size:9px">(catalyst news — small cap coverage)</span></div>
+      <input class="sp-input" id="fhKeyInput" placeholder="la tua Finnhub key..." />
       <div class="sp-status" id="fmpStatus2">Opzionale — si attiva automaticamente quando la key principale è esaurita</div>
     </div>
     <hr class="sp-divider">
@@ -1031,10 +1033,10 @@ body {
 ══════════════════════════════════ */
 const NETLIFY_PROXY = '/.netlify/functions/yahoo-proxy';
 
-async function fetchWithTimeout(url, ms=15000) {
+async function fetchWithTimeout(url, ms=15000, options={}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { signal: controller.signal })
+  return fetch(url, { ...options, signal: controller.signal })
     .finally(() => clearTimeout(timer));
 }
 
@@ -1075,6 +1077,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (fmp2) document.getElementById('fmpKey2Input').value = fmp2;
   const bz = localStorage.getItem('mi_bzkey');
   if (bz) document.getElementById('bzKeyInput').value = bz;
+  const fh = localStorage.getItem('mi_fhkey');
+  if (fh && document.getElementById('fhKeyInput')) document.getElementById('fhKeyInput').value = fh;
   updateKeyStatus();
   updateFmpDisplay();
   checkPremarketWarning();
@@ -1099,6 +1103,9 @@ function saveSettings() {
   const bz2  = document.getElementById('bzKeyInput')?.value?.trim();
   if (bz2) localStorage.setItem('mi_bzkey', bz2);
   else localStorage.removeItem('mi_bzkey');
+  const fh2 = document.getElementById('fhKeyInput')?.value?.trim();
+  if (fh2) localStorage.setItem('mi_fhkey', fh2);
+  else localStorage.removeItem('mi_fhkey');
   if (fmp2) localStorage.setItem('mi_fmpkey2', fmp2);
   else localStorage.removeItem('mi_fmpkey2');
   updateKeyStatus();
@@ -1107,6 +1114,7 @@ function saveSettings() {
 
 // Restituisce la key FMP attiva — usa key2 automaticamente se fmpCount >= 200
 function getBzKey()   { return localStorage.getItem('mi_bzkey')  || document.getElementById('bzKeyInput')?.value?.trim() || ''; }
+function getFhKey()   { return localStorage.getItem('mi_fhkey')  || document.getElementById('fhKeyInput')?.value?.trim() || ''; }
 function getFmpKey() {
   const count = parseInt(localStorage.getItem('mi_fmpcount') || '0', 10);
   const key2  = localStorage.getItem('mi_fmpkey2') || document.getElementById('fmpKey2Input')?.value?.trim() || '';
@@ -1498,6 +1506,7 @@ async function runScan() {
         // Simula selezione di tutti i ticker
         const allIndices = masterData.map((_, i) => i);
         await runAutoEnrich(allIndices);
+        runAutoNews(allIndices);
       }, 500);
     }
   } catch(e) {
@@ -1759,6 +1768,7 @@ async function runPreScan() {
       setTimeout(async () => {
         const allIndices = masterData.map((_, i) => i);
         await runAutoEnrich(allIndices);
+        runAutoNews(allIndices);
       }, 500);
     }
 
@@ -1795,6 +1805,57 @@ async function fetchBzNews(ticker) {
         new Date(n.created).toISOString().split('T')[0] === todayStr : false
     }));
   } catch(e) { return []; }
+}
+
+async function fetchFhNews(ticker, fhKey) {
+  const today = new Date();
+  const to   = today.toISOString().split('T')[0];
+  const from = new Date(today - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  try {
+    const url = 'https://finnhub.io/api/v1/company-news?symbol=' + ticker + '&from=' + from + '&to=' + to + '&token=' + fhKey;
+    const r = await fetchWithTimeout(url, 8000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
+    const todayStr = to;
+    return data
+      .filter(function(n) { return n.source !== 'ChartMill'; })
+      .map(function(n) {
+        const d = new Date(n.datetime * 1000).toISOString().split('T')[0];
+        return Object.assign({}, n, { isToday: d === todayStr });
+      })
+      .slice(0, 5);
+  } catch(e) { return []; }
+}
+
+function updateCatalystCell(cell, news) {
+  if (news.length > 0) {
+    const title = news[0].headline || '';
+    const short = title.length > 35 ? title.substring(0, 35) + '…' : title;
+    const hasToday = news.some(function(n) { return n.isToday; });
+    const color = hasToday ? 'var(--green)' : 'var(--amber)';
+    const label = hasToday ? 'oggi' : 'ieri';
+    cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
+      '<div class="pgc-val" style="color:' + color + '">⚡</div>' +
+      '<div class="pgc-sub" style="color:' + color + ';font-size:7px">' + label + ': ' + short + '</div>';
+  } else {
+    cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
+  }
+}
+
+async function runAutoNews(indices) {
+  const fhKey = getFhKey();
+  if (!fhKey || !indices.length) return;
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i];
+    const t = masterData[idx];
+    if (!t || t._fhNews !== undefined) continue;
+    const news = await fetchFhNews(t.ticker, fhKey);
+    t._fhNews = news;
+    const cell = document.getElementById('catalyst-cell-' + t.ticker);
+    if (cell) updateCatalystCell(cell, news);
+    if (i < indices.length - 1) await sleep(300);
+  }
 }
 
 async function fetchFmpGainers() {
@@ -2668,26 +2729,17 @@ function showPrelimDetail(t) {
     </div>`;
 
 
-  // Fetch news Benzinga in background — aggiorna pillar catalyst
-  fetchBzNews(t.ticker).then(news => {
-    const cell = document.getElementById('catalyst-cell-' + t.ticker);
-    if (!cell) return;
-    const mdIdx = masterData.findIndex(x => x.ticker === t.ticker);
-    if (mdIdx >= 0) masterData[mdIdx]._bzNews = news;
-    t._bzNews = news;
-    if (news.length > 0) {
-      const title = news[0].title || '';
-      const short = title.length > 35 ? title.substring(0,35)+'\u2026' : title;
-      const hasToday = news.some(n => n.isToday);
-      const color = hasToday ? 'var(--green)' : 'var(--amber)';
-      const label = hasToday ? 'oggi' : 'ieri';
-      cell.innerHTML = '<div class="pgc-name">CATAL.</div>' +
-        '<div class="pgc-val" style="color:' + color + '">\u26a1</div>' +
-        '<div class="pgc-sub" style="color:' + color + ';font-size:7px" title="' + title.replace(/"/g,"'") + '">' + label + ': ' + short + '</div>';
-    } else {
-      cell.innerHTML = '<div class="pgc-name">CATAL.</div><div class="pgc-val pv-na">?</div><div class="pgc-sub">nessuna news</div>';
-    }
-  });
+  // Fetch news Finnhub in background — aggiorna pillar catalyst
+  var fhKey = getFhKey();
+  if (fhKey && t._fhNews === undefined) {
+    fetchFhNews(t.ticker, fhKey).then(function(news) {
+      t._fhNews = news;
+      var mdIdx = masterData.findIndex(function(x) { return x.ticker === t.ticker; });
+      if (mdIdx >= 0) masterData[mdIdx]._fhNews = news;
+      var cell = document.getElementById('catalyst-cell-' + t.ticker);
+      if (cell) updateCatalystCell(cell, news);
+    });
+  }
 }
 
 function showRossDetail(t) {
@@ -3106,10 +3158,12 @@ async function analyzeTickerIdx(idx) {
 }
 
 async function callClaude(ticker, apiKey) {
-  // Includi news Benzinga se disponibili
-  const bzNewsContext = ticker._bzNews && ticker._bzNews.length > 0
-    ? `\nNOTIZIE BENZINGA (ultime ${ticker._bzNews.length} — priorità: oggi > ieri):\n` +
-      ticker._bzNews.map(n => `- [${n.isToday ? 'OGGI' : 'IERI'}] ${n.title}`).join('\n')
+  // Includi news Finnhub se disponibili
+  const bzNewsContext = ticker._fhNews && ticker._fhNews.length > 0
+    ? '\nNOTIZIE RECENTI (Finnhub — priorità: oggi > ieri):\n' +
+      ticker._fhNews.map(function(n) {
+        return '- [' + (n.isToday ? 'OGGI' : 'IERI') + '] ' + n.headline + ' (' + n.source + ')';
+      }).join('\n')
     : '';
 
   const prompt = `Trader esperto, metodo Ross Cameron 5 Pillars momentum trading.
