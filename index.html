@@ -2081,12 +2081,19 @@ function renderTickers(tickers, fromSort = false) {
    CHECKBOX + FLOAT ENRICH
 ══════════════════════════════════ */
 function getCheckedIndices() {
-  // Restituisce indici numerici cercando per ticker symbol in scanData
+  // Restituisce indici in scanData (lista visibile) — stabile per Ross e Enrich
   return [...document.querySelectorAll('[id^="chk"]:checked')]
     .map(cb => cb.dataset.ticker)
     .filter(Boolean)
-    .map(sym => masterData.findIndex(t => t.ticker === sym))
+    .map(sym => scanData.findIndex(t => t.ticker === sym))
     .filter(i => i >= 0);
+}
+
+function getCheckedTickers() {
+  // Restituisce ticker symbols direttamente — usato dove serve il ticker non l'indice
+  return [...document.querySelectorAll('[id^="chk"]:checked')]
+    .map(cb => cb.dataset.ticker)
+    .filter(Boolean);
 }
 
 function updateFloatBtn() {
@@ -2437,16 +2444,31 @@ async function runFloatEnrich() {
       if (liveChg != null || livePrice != null) {
         const row = document.querySelector(`[data-ticker="${t.ticker}"]`);
         if (row) {
-          if (livePrice != null) {
-            const priceCell = row.querySelector('.tr-price');
-            if (priceCell) priceCell.firstChild.textContent = `$${livePrice.toFixed(2)}`;
+          const md = masterData[idx];
+          const extLbl = (() => {
+            const now = new Date();
+            const h = parseInt(new Intl.DateTimeFormat('en-US',{hour:'numeric',hour12:false,timeZone:'America/New_York'}).format(now));
+            const m = parseInt(new Intl.DateTimeFormat('en-US',{minute:'numeric',timeZone:'America/New_York'}).format(now));
+            return (h * 60 + m) < 570 ? 'PRE' : 'AH';
+          })();
+          // Ricostruisce intera cella prezzo — evita duplicati
+          const priceCell = row.querySelector('.tr-price');
+          if (priceCell) {
+            const px = livePrice != null ? livePrice : md.price;
+            const eth = md.ethPrice;
+            const ethCls = eth && md.ethChg != null ? (md.ethChg > 0 ? 'tr-eth-up' : md.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat') : 'tr-eth-flat';
+            priceCell.innerHTML = `<div>$${px.toFixed(2)}</div>${eth ? `<div class="tr-eth ${ethCls}">${extLbl} $${eth.toFixed(2)}</div>` : ''}`;
           }
+          // Ricostruisce intera cella chg% — evita duplicati
           if (liveChg != null) {
             const chgCell = row.querySelector('.tr-chg');
             if (chgCell) {
               const pfx = liveChg >= 0 ? '+' : '';
-              chgCell.textContent = `${pfx}${liveChg.toFixed(2)}%`;
+              const ethChg = md.ethChg;
+              const ethChgCls = ethChg != null ? (ethChg > 0 ? 'tr-eth-up' : ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat') : 'tr-eth-flat';
+              const ethChgStr = ethChg != null ? `${ethChg > 0 ? '+' : ''}${ethChg.toFixed(2)}%` : '';
               chgCell.className = 'tr-chg ' + (liveChg > 0 ? 'chg-up' : liveChg < 0 ? 'chg-dn' : '');
+              chgCell.innerHTML = `<div>${pfx}${liveChg.toFixed(2)}%</div>${ethChg != null ? `<div class="tr-eth ${ethChgCls}">${extLbl} ${ethChgStr}</div>` : ''}`;
             }
           }
         }
@@ -2766,7 +2788,7 @@ function sortTable(col) {
 ══════════════════════════════════ */
 let rossPage     = 0;
 let rossScanning = false;
-const ROSS_PAGE_SIZE = 2;
+const ROSS_PAGE_SIZE = 5;
 
 // Scan Ross solo sui ticker selezionati con checkbox
 async function runRossSelected() {
@@ -2820,7 +2842,13 @@ async function runRossSelected() {
         if (bzBadge) bzBadge.after(rb);
         else nameCell2.insertBefore(rb, nameCell2.firstChild);
       }
-    } catch(e) { console.warn('Ross error', t.ticker, e); }
+    } catch(e) {
+      console.warn('Ross error', t.ticker, e);
+      const rossCell2 = document.getElementById(`ross-${t.ticker}`);
+      if (rossCell2) rossCell2.innerHTML = '<span style="color:var(--red);font-size:9px">ERR</span>';
+      document.getElementById('rossProgress').textContent = `⚠ Errore ${t.ticker}: ${e.message?.substring(0,40) || 'timeout'}`;
+      await sleep(1000);
+    }
 
     if (i < indices.length - 1) await sleep(800);
   }
