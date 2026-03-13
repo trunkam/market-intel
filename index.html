@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Market Intel v4</title>
+<title>Market Intel v6.16</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
 
@@ -822,7 +822,6 @@ body {
   </div>
   <div class="vsep"></div>
   <button class="scan-btn" id="scanBtn" onclick="runScan()">▶ SCAN ORA</button>
-  <button class="scan-btn" id="preScanBtn" onclick="runPreScan()" style="background:transparent;border:1px solid var(--amber);color:var(--amber)" title="Premarket scan — Benzinga PRE_MARKET movers">⚡ PRE SCAN</button>
   <button class="scan-btn" onclick="clearSessionCache()" title="Svuota storico sessione (float + analisi)" style="background:transparent;border:1px solid var(--border2);color:var(--muted3);font-size:9px;padding:4px 8px">🗑 RESET CACHE</button>
   <button class="scan-btn" id="rossBtn" onclick="runRossScan()" style="display:none;background:transparent;border:1px solid var(--amber);color:var(--amber)">🎯 SCAN ROSS</button>
   <div id="rossProgress" style="display:none;font-size:9px;color:var(--muted3);white-space:nowrap"></div>
@@ -1234,6 +1233,69 @@ function marketStatus() {
   return 'closed';
 }
 
+// Sessione reale da Benzinga — fonte di verità
+// marketState valori attesi: PRE, REGULAR, POST, EXTENDED, CLOSED
+let _bzSessionCache = null;
+let _bzSessionTime  = 0;
+
+async function detectSessionFromBenzinga() {
+  const bzKey = getBzKey();
+  if (!bzKey) return null; // nessuna key — fallback al calcolo locale
+
+  // Cache 60 secondi — non chiamare ogni scan
+  const now = Date.now();
+  if (_bzSessionCache && (now - _bzSessionTime) < 60000) return _bzSessionCache;
+
+  try {
+    const url = `https://api.benzinga.com/api/v2/quoteDelayed?symbols=SPY&token=${bzKey}`;
+    const r = await fetchWithTimeout(url, 8000);
+    if (!r.ok) return null;
+    const data = await r.json();
+    const quotes = data?.quotes || [];
+    const state = quotes[0]?.quote?.marketState || null;
+    if (!state) return null;
+
+    _bzSessionCache = state;
+    _bzSessionTime  = now;
+
+    // Aggiorna pill NYSE/NASDAQ con fonte reale
+    updateMarketPillsFromBz(state);
+    return state;
+  } catch(e) { return null; }
+}
+
+function updateMarketPillsFromBz(state) {
+  // state: PRE → premarket, REGULAR → aperto, POST/EXTENDED → afterhours, CLOSED → chiuso
+  const map = {
+    'PRE':      ['PRE-MKT', 'mp-pre'],
+    'REGULAR':  ['APERTO',  'mp-open'],
+    'POST':     ['AFT',     'mp-pre'],
+    'EXTENDED': ['AFT',     'mp-pre'],
+    'CLOSED':   ['CHIUSO',  'mp-closed'],
+  };
+  const [txt, cls] = map[state] || ['CHIUSO', 'mp-closed'];
+  ['nyseStatus','nasdaqStatus'].forEach((id,i) => {
+    document.getElementById(id).className = `mpill ${cls}`;
+    document.getElementById(id).textContent = `${i===0?'NYSE':'NASDAQ'} ${txt}`;
+  });
+  const modeMap = {
+    'PRE':      '⚡ PRE-MARKET',
+    'REGULAR':  '● INTRADAY',
+    'POST':     '◎ AFTER-HRS',
+    'EXTENDED': '◎ AFTER-HRS',
+    'CLOSED':   '○ FUORI SESSIONE',
+  };
+  document.getElementById('modeLabel').textContent = modeMap[state] || '○ FUORI SESSIONE';
+}
+
+function bzStateToBzSession(state) {
+  // Converte marketState Benzinga → parametro session per movers endpoint
+  if (state === 'PRE')      return 'PRE_MARKET';
+  if (state === 'REGULAR')  return 'REGULAR';
+  if (state === 'POST' || state === 'EXTENDED') return 'AFTER_MARKET';
+  return 'PRE_MARKET'; // CLOSED → usa PRE per avere dati recenti
+}
+
 function updateClock() {
   const now = new Date();
   document.getElementById('clock').textContent =
@@ -1334,7 +1396,7 @@ function toggleRvol(el) {
 }
 
 /* ══════════════════════════════════
-   SCREENER — v6.0 YAHOO PRIMARY
+   SCREENER — v6.16 BENZINGA PRIMARY
 ══════════════════════════════════ */
 
 // Yahoo screener IDs da provare in ordine
@@ -1359,8 +1421,17 @@ async function runScan() {
   const USE_YAHOO_MICRO     = false; // disabilita Yahoo micro-float
 
   try {
-    // Benzinga REGULAR movers — fonte primaria
-    let bzRegularTickers = await fetchBzMovers('REGULAR', 50);
+    // Rileva sessione reale da Benzinga
+    const bzState   = await detectSessionFromBenzinga();
+    const bzSession = bzState ? bzStateToBzSession(bzState) : (() => {
+      // Fallback calcolo locale se Benzinga non risponde
+      const ms = marketStatus();
+      return ms === 'pre' ? 'PRE_MARKET' : ms === 'after' ? 'AFTER_MARKET' : 'REGULAR';
+    })();
+    setScanStatus(`Sessione: ${bzSession.replace('_',' ')} — recupero movers...`);
+
+    // Benzinga movers con sessione rilevata automaticamente
+    let bzRegularTickers = await fetchBzMovers(bzSession, 50);
 
     // FMP fallback se Benzinga vuota
     let fmpTickers = [];
@@ -1623,8 +1694,13 @@ async function runPreScan() {
     </div>`;
 
   try {
-    // 1. Benzinga PRE_MARKET movers — fonte primaria
-    let bzTickers = await fetchBzMovers('PRE_MARKET', 50);
+    // 1. Rileva sessione reale da Benzinga (stesso meccanismo di runScan)
+    const bzStateP   = await detectSessionFromBenzinga();
+    const bzSessionP = bzStateP ? bzStateToBzSession(bzStateP) : 'PRE_MARKET';
+    setScanStatus(`Sessione: ${bzSessionP.replace('_',' ')} — recupero movers...`);
+
+    // Benzinga movers con sessione rilevata automaticamente
+    let bzTickers = await fetchBzMovers(bzSessionP, 50);
 
     // 2. FMP gainers — fallback o integrazione se Benzinga vuota
     let fmpTickers = [];
