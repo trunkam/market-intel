@@ -1987,7 +1987,7 @@ function calcPrelimRoss(t) {
 }
 
 function updatePrelimRossCell(idx, t) {
-  const cell = document.getElementById(`ross${idx}`);
+  const cell = document.getElementById(`ross-${t?.ticker || idx}`);
   if (!cell) return;
   // Non sovrascrivere se c'è già un'analisi Ross reale
   if (t._analysis?.rossScore) return;
@@ -2038,9 +2038,9 @@ function renderTickers(tickers, fromSort = false) {
     const needsEnrich = true; // checkbox su tutti — serve per FMP enrich E per Ross selezionato
     const si = t._scanIdx ?? i; // indice reale in scanData
     const outOfScanStyle = t._outOfScan ? 'opacity:.65;border-left:2px solid var(--amber)' : '';
-    return `<div class="ticker-row" id="tr${i}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
+    return `<div class="ticker-row" id="tr-${t.ticker}" data-ticker="${t.ticker}" onclick="selectTickerBySymbol('${t.ticker}')" style="animation-delay:${i*.04}s;${outOfScanStyle}">
       <div class="tr-check" onclick="event.stopPropagation()">
-        ${needsEnrich ? `<input type="checkbox" id="chk${i}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
+        ${needsEnrich ? `<input type="checkbox" id="chk-${t.ticker}" data-scanidx="${si}" data-ticker="${t.ticker}" onchange="updateFloatBtn()">` : ''}
       </div>
       <div class="tr-ticker">${t.ticker}${t._outOfScan ? '<span style="font-size:7px;color:var(--amber);margin-left:3px;vertical-align:middle">⚠</span>' : ''}</div>
       <div class="tr-price">
@@ -2054,7 +2054,7 @@ function renderTickers(tickers, fromSort = false) {
       <div class="tr-vol" id="vol${si}">${fmtVol(t.vol)}</div>
       <div class="tr-float" id="float${si}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">${t.float ? fmtVol(t.float) : (t.source === 'FMP' ? '<span style="color:var(--muted3);font-size:8px">FMP</span>' : '--')}</div>
       <div class="tr-rvol ${rvolCls}" id="rvol${si}">${t.rvol ? t.rvol.toFixed(1)+'x' : '--'}</div>
-      <div class="tr-ross" id="ross${si}">${(() => {
+      <div class="tr-ross" id="ross-${t.ticker}">${(() => {
         if (t._analysis?.rossScore) {
           const s = t._analysis.rossScore;
           const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
@@ -2066,7 +2066,7 @@ function renderTickers(tickers, fromSort = false) {
         }
         return '--';
       })()}</div>
-      <div class="tr-name" id="name${si}" title="${t.name}">
+      <div class="tr-name" id="name-${t.ticker}" title="${t.name}">
         ${t.source === 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : t._fromMostActive && !t._fromGainers ? '<span class="wf-badge wf-fmp-active">ACTIVE</span>' : '<span class="wf-badge wf-fmp">FMP</span>'}
         ${t._bzEnriched && t.source !== 'BZ' ? '<span class="wf-badge wf-bz">BZ</span>' : ''}
         ${t._analysis ? '<span class="wf-badge wf-ross">★ ROSS</span>' : ''}
@@ -2461,7 +2461,7 @@ async function runFloatEnrich() {
   btn.disabled = false;
   btn.style.display = 'inline-block'; // sempre visibile dopo enrich
   // Deseleziona tutti i checkbox
-  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
+  document.querySelectorAll('[id^="chk-"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
   showToast(`✓ Enrich completato per ${updated}/${indices.length} ticker`);
@@ -2748,14 +2748,14 @@ function sortTable(col) {
 
   // Dopo il re-render, ripristina i punteggi Ross già calcolati
   scanData.forEach((t, i) => {
-    const cell = document.getElementById(`ross${i}`);
+    const cell = document.getElementById(`ross-${scanData[i]?.ticker || i}`);
     if (!cell) return;
     if (t._analysis) {
       const score = t._analysis.rossScore || 0;
       const col   = score >= 7 ? 'var(--green)' : score >= 4 ? 'var(--amber)' : 'var(--red)';
       cell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
       // Ripristina colore bordo riga
-      const row = document.getElementById(`tr${i}`);
+      const row = document.getElementById(`tr-${scanData[i]?.ticker || i}`);
       if (row) row.style.borderLeft = score >= 7 ? '2px solid var(--green)' : score >= 4 ? '2px solid var(--amber)' : '';
     }
   });
@@ -2790,7 +2790,7 @@ async function runRossSelected() {
     document.getElementById('rossProgress').textContent =
       `🎯 Analisi ${i + 1}/${indices.length} — ${t.ticker}...`;
 
-    const rossCell = document.getElementById(`ross${idx}`);
+    const rossCell = document.getElementById(`ross-${t.ticker}`);
     if (rossCell) rossCell.innerHTML = '<span style="color:var(--muted2)">...</span>';
 
     try {
@@ -2804,11 +2804,11 @@ async function runRossSelected() {
       sessionCache[t.ticker]._analysis = rep;
       if (rossCell) rossCell.innerHTML = `<span style="color:${col};font-size:13px">${score}</span>`;
 
-      const row = document.getElementById(`tr${i}`);
+      const row = document.getElementById(`tr-${t.ticker}`);
       if (row && score >= 7) row.style.borderLeft = '2px solid var(--green)';
 
       // Aggiungi badge ★ ROSS nella colonna nome
-      const nameCell2 = document.getElementById(`name${i}`);
+      const nameCell2 = document.getElementById(`name-${t.ticker}`);
       if (nameCell2 && !nameCell2.querySelector('.wf-ross')) {
         const rb = document.createElement('span');
         rb.className = 'wf-badge wf-ross';
@@ -2827,7 +2827,7 @@ async function runRossSelected() {
   btn.disabled = false;
   document.getElementById('rossProgress').textContent = `✓ ${indices.length} ticker analizzati`;
 
-  document.querySelectorAll('[id^="chk"]').forEach(cb => cb.checked = false);
+  document.querySelectorAll('[id^="chk-"]').forEach(cb => cb.checked = false);
   const ca = document.getElementById('checkAll');
   if (ca) { ca.checked = false; ca.style.background = 'transparent'; ca.style.borderColor = 'var(--border2)'; }
   updateFloatBtn();
@@ -2866,11 +2866,11 @@ async function runRossScan() {
     // Trova la riga per ticker (stabile anche dopo sort)
     function getRossCell(ticker) {
       const idx = scanData.findIndex(x => x.ticker === ticker);
-      return idx >= 0 ? document.getElementById(`ross${idx}`) : null;
+      const tk = scanData[idx]?.ticker; return tk ? document.getElementById(`ross-${tk}`) : null;
     }
     function getTickerRow(ticker) {
       const idx = scanData.findIndex(x => x.ticker === ticker);
-      return idx >= 0 ? document.getElementById(`tr${idx}`) : null;
+      const tk2 = scanData[idx]?.ticker; return tk2 ? document.getElementById(`tr-${tk2}`) : null;
     }
 
     const rossCell = getRossCell(t.ticker);
@@ -3112,7 +3112,7 @@ function renderAnalysis(rep, elapsed) {
     // Salva nel sessionCache
     if (!sessionCache[rep.ticker || currentTicker]) sessionCache[rep.ticker || currentTicker] = {};
     sessionCache[rep.ticker || currentTicker]._analysis = rep;
-    const rossCell = document.getElementById(`ross${idx}`);
+    const rossCell = document.getElementById(`ross-${masterData[idx]?.ticker || idx}`);
     if (rossCell && rep.rossScore) {
       const s = rep.rossScore;
       const col = s >= 7 ? 'var(--green)' : s >= 4 ? 'var(--amber)' : 'var(--red)';
