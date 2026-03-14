@@ -246,7 +246,7 @@ body {
 /* table header */
 .tbl-head {
   display: grid;
-  grid-template-columns: 24px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 52px 80px 75px 72px 72px 72px 50px 1fr 100px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--s2);
@@ -271,7 +271,7 @@ body {
 
 .ticker-row {
   display: grid;
-  grid-template-columns: 24px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 24px 52px 80px 75px 72px 72px 72px 50px 1fr 100px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -308,7 +308,7 @@ body {
 /* table header */
 .tbl-head {
   display: grid;
-  grid-template-columns: 28px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 28px 52px 80px 75px 72px 72px 72px 50px 1fr 100px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--s2);
@@ -333,7 +333,7 @@ body {
 
 .ticker-row {
   display: grid;
-  grid-template-columns: 28px 65px 80px 75px 65px 65px 55px 50px 1fr 100px;
+  grid-template-columns: 28px 52px 80px 75px 72px 72px 72px 50px 1fr 100px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -2139,7 +2139,10 @@ function renderTickers(tickers, fromSort = false) {
         <div>${chgPfx}${t.chg.toFixed(2)}%</div>
         ${t.ethChg != null && !isRegularSession ? `<div class="tr-eth ${t.ethChg > 0 ? 'tr-eth-up' : t.ethChg < 0 ? 'tr-eth-down' : 'tr-eth-flat'}">${extLabel} ${t.ethChg > 0 ? '+' : ''}${t.ethChg.toFixed(2)}%</div>` : ''}
       </div>
-      <div class="tr-vol" id="vol-${t.ticker}">${fmtVol(t.vol)}</div>
+      <div class="tr-vol" id="vol-${t.ticker}">
+        ${fmtVol(t.vol)}
+        ${t.vol && t._srcPrice ? `<span class="src-badge src-${t._srcPrice.toLowerCase()}">${t._srcPrice}</span>` : ''}
+      </div>
       <div class="tr-float" id="float-${t.ticker}" style="${t.float && t.float < 10e6 ? 'color:var(--green);font-weight:bold' : ''}">
         ${t.float ? fmtVol(t.float) : '--'}
         ${t.float && t._srcFloat ? `<span class="src-badge src-${t._srcFloat.toLowerCase()}">${t._srcFloat}</span>` : ''}
@@ -2300,7 +2303,7 @@ async function runAutoEnrich(indices) {
     const ticker = t.ticker;
 
     if (bz.float  != null) { masterData[idx].float  = bz.float;  masterData[idx]._srcFloat = 'BZ'; }
-    if (bz.vol    != null) { masterData[idx].vol    = bz.vol;    masterData[idx]._srcPrice = 'BZ'; }
+    if (bz.vol    != null) { masterData[idx].vol    = bz.vol;    masterData[idx]._srcPrice = 'BZ'; masterData[idx]._srcVol = 'BZ'; }
     if (bz.avgVol != null) { masterData[idx].avgVol = bz.avgVol; masterData[idx]._srcRvol  = 'BZ'; }
     // NON sovrascrivere chg e price con valori Benzinga — potrebbero essere afterhours
     // I valori originali FMP (chg, price) restano per i filtri
@@ -2335,7 +2338,11 @@ async function runAutoEnrich(indices) {
       floatCell.innerHTML = fmtVol(bz.float) + badgeFloat;
     }
     const volCell = document.getElementById(`vol-${ticker}`);
-    if (volCell && bz.vol) volCell.textContent = fmtVol(bz.vol);
+    if (volCell && bz.vol) {
+      const srcVol = masterData[idx]._srcPrice || '';
+      const badgeVol = srcVol ? `<span class="src-badge src-${srcVol.toLowerCase()}">${srcVol}</span>` : '';
+      volCell.innerHTML = fmtVol(bz.vol) + badgeVol;
+    }
     const rvolCell = document.getElementById(`rvol-${ticker}`);
     if (rvolCell && masterData[idx].rvol) {
       const rv = masterData[idx].rvol;
